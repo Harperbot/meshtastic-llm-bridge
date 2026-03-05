@@ -37,9 +37,9 @@ Most LLM solutions rely entirely on internet connectivity. **Meshtastic-LLM Brid
 - **OS**: Linux, macOS, or Windows (via WSL2).
 - **Python**: v3.9 or higher.
 - **Meshtastic Device**: A working Meshtastic device connected via USB (or configurable for TCP/IP).
-- **Local LLM**: 
-  - **LM Studio** ([lmstudio.ai](https://lmstudio.ai/)): Recommended for ease of use (GUI). Download a model and start the local server.
-  - **Ollama** ([ollama.ai](https://ollama.ai/)): Command-line friendly. Install and run a model (e.g., `ollama run gemma:2b`).
+- **Local LLM**: (Essential for offline chat, reasoning, and local RAG embeddings)
+  - **LM Studio** ([lmstudio.ai](https://lmstudio.ai/)): Recommended for ease of use (GUI). Download a **chat model** and an **embedding model** (e.g., `nomic-ai/nomic-embed-text-v1.5`), then start the local server.
+  - **Ollama** ([ollama.ai](https://ollama.ai/)): Command-line friendly. Install a **chat model** (e.g., `ollama run gemma:2b`) and an **embedding model** (e.g., `ollama run nomic-embed-text`). Ensure the Ollama server is running.
 
 ## 🔑 Account & Key Requirements
 

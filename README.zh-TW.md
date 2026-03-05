@@ -37,9 +37,9 @@
 - **作業系統**：Linux、macOS 或 Windows（透過 WSL2）。
 - **Python**：v3.9 或更高版本。
 - **Meshtastic 設備**：一個正常運作的 Meshtastic 設備，透過 USB 連接（或可配置為 TCP/IP）。
-- **本地 LLM**：
-  - **LM Studio** ([lmstudio.ai](https://lmstudio.ai/))：推薦給新手（圖形化介面）。下載模型後啟動本地伺服器。
-  - **Ollama** ([ollama.ai](https://ollama.ai/))：命令列友善。安裝後運行一個模型（例如 `ollama run gemma:2b`）。
+- **本地 LLM**：(離線聊天、推理與本地 RAG Embedding 的核心)
+  - **LM Studio** ([lmstudio.ai](https://lmstudio.ai/))：推薦給新手（圖形化介面）。下載一個**聊天模型**和一個 **Embedding 模型**（例如 `nomic-ai/nomic-embed-text-v1.5`），然後啟動本地伺服器。
+  - **Ollama** ([ollama.ai](https://ollama.ai/))：命令列友善。安裝一個**聊天模型**（例如 `ollama run gemma:2b`）和一個 **Embedding 模型**（例如 `ollama run nomic-embed-text`）。確保 Ollama 伺服器正在運行。
 
 ## 🔑 帳號與金鑰要求
 

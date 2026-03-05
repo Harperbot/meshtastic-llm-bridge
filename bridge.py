@@ -208,12 +208,58 @@ def execute_llm_tool_call(tool_call, is_online, localization_setting):
     except Exception as e:
         return {"tool_output": f"❌ 工具執行發生未預期錯誤: {e}"}
 
+def get_node_location(node_id_to_find):
+    """執行 meshtastic --nodes 並解析輸出，獲取指定節點的 GPS 位置"""
+    try:
+        result = subprocess.run(["meshtastic", "--nodes"], capture_output=True, text=True, timeout=20)
+        if result.returncode != 0:
+            return None, "meshtastic --nodes command failed"
+        
+        lines = result.stdout.strip().split('\n')
+        # Find header to locate columns dynamically
+        header = [h.strip() for h in lines[0].split('|')]
+        try:
+            user_col = header.index("User")
+            lat_col = header.index("Latitude")
+            lon_col = header.index("Longitude")
+        except ValueError:
+            return None, "Could not parse --nodes header"
+
+        for line in lines[2:]: # Skip header and separator
+            cols = [c.strip() for c in line.split('|')]
+            if len(cols) > user_col and node_id_to_find in cols[user_col]:
+                lat = float(cols[lat_col])
+                lon = float(cols[lon_col])
+                if lat != 0.0 and lon != 0.0:
+                    return (lat, lon), None
+        
+        return None, "Node not found or has no GPS data"
+    except Exception as e:
+        return None, str(e)
+
 # --- Main Logic ---
 
 def handle_incoming_meshtastic_message(sender_id, text_message):
+    """處理收到的 Meshtastic 訊息"""
     global internet_connected
 
-    # 1. 檢查網路狀態
+    # --- GPS 感知天氣查詢 (新增功能) ---
+    if "weather here" in text_message.lower() or "附近天氣" in text_message:
+        print(f"偵測到 GPS 天氣查詢 from {sender_id}")
+        (lat, lon), error_msg = get_node_location(sender_id)
+        if error_msg:
+            send_meshtastic_message(f"❌ 無法獲取您的 GPS 位置: {error_msg}", destination_id=sender_id)
+            return
+
+        tool_result = execute_llm_tool_call(
+            {"function": {"name": "query_surf_spots", "arguments": {"lat": lat, "lon": lon}}},
+            check_internet_connection(),
+            LOCALIZATION
+        )
+        send_meshtastic_message(tool_result.get("tool_output", "查詢失敗"), destination_id=sender_id)
+        return
+
+    # --- 原有 LLM 處理流程 ---
     internet_status = "🟢 Online" if check_internet_connection() else "🔴 Offline"
     print(f"處理來自 {sender_id} 的訊息: '{text_message}' - 網路狀態: {internet_status}")
 
@@ -228,7 +274,6 @@ def handle_incoming_meshtastic_message(sender_id, text_message):
         response_message = call_gemini_api_online(text_message, chat_history)
     else:
         print("使用本地 LLM (離線模式)...")
-        # 將 RAG 上下文加入 prompt，再進行本地 LLM 呼叫
         rag_context = ""
         # TODO: Integrate RAG here as part of the local LLM call or as a separate step
         llm_prompt = text_message # Placeholder
@@ -237,10 +282,10 @@ def handle_incoming_meshtastic_message(sender_id, text_message):
     # 3. 處理 LLM 的回覆
     final_response_text = ""
 
-    if response_message.tool_calls:
+    if hasattr(response_message, 'tool_calls') and response_message.tool_calls:
         for tool_call in response_message.tool_calls:
             output = execute_llm_tool_call(tool_call, internet_connected, LOCALIZATION)
-            tool_outputs.append(output) # 儲存工具輸出
+            tool_outputs.append(output)
             print(f"工具 {tool_call.function.name} 執行結果: {output}")
         
         # 將工具輸出回傳給 LLM 進行第二次呼叫，獲取最終答案
@@ -248,13 +293,12 @@ def handle_incoming_meshtastic_message(sender_id, text_message):
             second_response = call_gemini_api_online(
                 "", # Prompt can be empty for tool response
                 chat_history + [
-                    response_message, # Add LLM's tool call message
-                    {"role": "tool", "content": json.dumps(tool_outputs)} # Add tool outputs
+                    {"role": "assistant", "content": None, "tool_calls": response_message.tool_calls},
+                    {"role": "tool", "content": json.dumps(tool_outputs)}
                 ]
             )
             final_response_text = second_response.content
         else:
-            # 離線模式下，本地 LLM 可能需要更明確的 prompt 來處理工具輸出
             local_tool_prompt = f"你剛才執行了工具，結果是: {json.dumps(tool_outputs)}。請根據此結果回答我的問題，並保持簡潔。\n原始問題: {text_message}"
             second_response = call_local_llm(local_tool_prompt, chat_history)
             final_response_text = second_response.content

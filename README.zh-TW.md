@@ -13,7 +13,10 @@
 - **雙模式 LLM 整合**：自動偵測網際網路連線狀態。
   - **在線模式**：連接到 Google Gemini API，提供強大、需要網路的 AI 回覆。
   - **離線模式**：無縫切換到本地 LLMs (LM Studio 或 Ollama)，提供離網 AI 能力。
-- **本地知識庫 (RAG)**：在離線模式下，LLM 可以查詢本地 `knowledge_base/` 目錄中的文件（PDF、Markdown、文字檔），以提供更豐富的答案。
+- **本地知識庫 (RAG)**：在離線模式下，LLM 可以查詢本地 `knowledge_base/` 目錄中的文件（PDF、Markdown、文字檔），以提供更豐富的答案。這對於離網生存與參考至關重要。
+- **智慧工具整合**：無縫整合 `find_parking` (停車查詢) 和 `query_surf_spots` (衝浪/天氣查詢) 工具。
+  - **`find_parking`**：在有網路時運作；如果網路中斷，則回傳「離線」訊息。
+  - **`query_surf_spots`**：離線時可提供一般浪點資訊與日出日落時間。即時潮汐、風況和颱風數據只有在有網路且配置 CWA API Key 時才可用。
 - **Meshtastic 通訊**：利用 Meshtastic CLI 進行 LoRa 網狀網路的訊息收發。
 - **訊息切分與分頁**：由於 LoRa 承載量有限，會自動將 LLM 的長回覆切分成多個 Meshtastic 封包，並加上分頁標示 (例如 `(1/3)`)。
 - **資源最佳化**：專為低頻寬、低功耗的 Meshtastic 網路設計。

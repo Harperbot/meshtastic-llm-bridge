@@ -13,7 +13,10 @@ It intelligently switches between online (Google Gemini) and offline (Local LLMs
 - **Dual-Mode LLM Integration**: Automatically detects internet connectivity.
   - **Online Mode**: Connects to Google Gemini API for powerful, internet-enabled AI responses.
   - **Offline Mode**: Seamlessly switches to local LLMs (LM Studio or Ollama) for off-grid AI capabilities.
-- **Local Knowledge Base (RAG)**: In offline mode, the LLM can query a local `knowledge_base/` of documents (PDFs, Markdown, text files) to provide informed answers.
+- **Local Knowledge Base (RAG)**: In offline mode, the LLM can query a local `knowledge_base/` of documents (PDFs, Markdown, text files) to provide informed answers. This is crucial for offline survival and reference.
+- **Smart Tool Integration**: Seamlessly integrates `find_parking` (parking query) and `query_surf_spots` (surf/weather query) tools.
+  - **`find_parking`**: Works when online; returns an "offline" message if the internet is down.
+  - **`query_surf_spots`**: Provides general surf spot info and calculates sunrise/sunset offline. Real-time tide, wind, and typhoon data are only available when online with a configured CWA API key.
 - **Meshtastic Communication**: Utilizes the Meshtastic CLI for sending and receiving messages over LoRa mesh networks.
 - **Message Chunking & Pagination**: Automatically splits long LLM responses into multiple Meshtastic packets with pagination (`(1/3)`) due to LoRa's limited payload size.
 - **Resource Optimization**: Designed for low-bandwidth, low-power Meshtastic networks.

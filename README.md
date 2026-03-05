@@ -13,6 +13,7 @@ It intelligently switches between online (Google Gemini) and offline (Local LLMs
 - **Dual-Mode LLM Integration**: Automatically detects internet connectivity.
   - **Online Mode**: Connects to Google Gemini API for powerful, internet-enabled AI responses.
   - **Offline Mode**: Seamlessly switches to local LLMs (LM Studio or Ollama) for off-grid AI capabilities.
+- **GPS-Aware Weather Queries**: Send a simple command like `"weather here"` from your device, and the bridge will automatically use your node's GPS location to fetch the local weather forecast, leveraging the `query_surf_spots` tool. No manual coordinates needed!
 - **Government Alert Broadcast**: In online mode, the bridge actively monitors Taiwan's NCDR (National Science and Technology Center for Disaster Reduction) CAP feed. If a severe alert (earthquake, typhoon, air raid, etc.) is issued, it will be automatically broadcast to all devices on the mesh network (`^all`).
 - **Local Knowledge Base (RAG)**: In offline mode, the LLM can query a local `knowledge_base/` of documents (PDFs, Markdown, text files) to provide informed answers. This is crucial for offline survival and reference.
 - **Smart Tool Integration**: Seamlessly integrates `find_parking` (parking query) and `query_surf_spots` (surf/weather query) tools.

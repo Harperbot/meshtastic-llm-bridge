@@ -31,10 +31,47 @@ LOCAL_LLM_MODEL = os.getenv("LOCAL_LLM_MODEL", "model-name-from-lm-studio-or-oll
 LOCAL_LLM_OLLAMA_API_BASE = os.getenv("LOCAL_LLM_OLLAMA_API_BASE", "http://localhost:11434/api")
 LOCAL_LLM_OLLAMA_MODEL = os.getenv("LOCAL_LLM_OLLAMA_MODEL", "gemma:2b")
 
-# --- Global State ---
-internet_connected = False
-last_internet_check = 0
-ONLINE_CHECK_INTERVAL = 60 # Check internet every 60 seconds
+processed_alert_ids = set() # 用於儲存已處理過的警報 ID
+NCDR_CAP_URL = "https://alerts.ncdr.nat.gov.tw/CAP/Atom.aspx"
+ALERT_CHECK_INTERVAL = 60 # 每 60 秒檢查一次警報
+
+def fetch_and_broadcast_ncdr_alerts():
+    """抓取 NCDR 災害警報並透過 Meshtastic 廣播"""
+    if not check_internet_connection():
+        return # 離線模式下無法抓取
+    
+    import feedparser
+    print("正在檢查 NCDR 災害警報...")
+    try:
+        feed = feedparser.parse(NCDR_CAP_URL)
+        for entry in feed.entries:
+            if entry.id not in processed_alert_ids:
+                # 解析 CAP (Common Alerting Protocol) 格式
+                severity = entry.cap_severity.lower()
+                urgency = entry.cap_urgency.lower()
+                event = entry.cap_event
+                
+                # 只廣播嚴重/緊急的警報
+                if severity in ["severe", "extreme"] and urgency in ["immediate", "expected"]:
+                    title = entry.title
+                    summary = entry.summary
+                    
+                    # 格式化成簡短訊息
+                    alert_text = f"🚨 緊急警報: [{event}] {title} - {summary}"
+                    
+                    print(f"偵測到新警報，進行廣播: {alert_text}")
+                    send_meshtastic_message(alert_text, destination_id="^all")
+                    processed_alert_ids.add(entry.id)
+                    time.sleep(5) # 避免短時間內連續廣播
+                    
+    except Exception as e:
+        print(f"抓取 NCDR 警報失敗: {e}", file=sys.stderr)
+
+def alert_checker_thread():
+    """背景執行緒，定期檢查警報"""
+    while True:
+        fetch_and_broadcast_ncdr_alerts()
+        time.sleep(ALERT_CHECK_INTERVAL)
 
 # --- Utility Functions ---
 MAX_MESHTASTIC_PAYLOAD = 220 # Roughly 220 bytes for plain text on Meshtastic LoRa
@@ -264,4 +301,9 @@ def main_loop():
 if __name__ == "__main__":
     # 啟動時先檢查一次網路
     check_internet_connection()
+    
+    # 在背景啟動警報檢查執行緒
+    alert_thread = threading.Thread(target=alert_checker_thread, daemon=True)
+    alert_thread.start()
+    
     main_loop()

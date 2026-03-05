@@ -73,61 +73,103 @@ def send_meshtastic_message(text, destination_id=None, reply_id=None):
         subprocess.run(cmd, capture_output=True, text=True)
         time.sleep(1) # Avoid flooding the mesh
 
-def call_gemini_api_online(prompt):
+def call_gemini_api_online(prompt, chat_history=None):
     """呼叫 Google Gemini API (在線模式) """
-    from openai import OpenAI # Gemini API is compatible with OpenAI client
-    client = OpenAI(api_key=GEMINI_API_KEY, base_url="https://generativelanguage.googleapis.com/v1beta/models/", default_headers={"x-goog-api-key": GEMINI_API_KEY})
+    from openai import OpenAI
+    client = OpenAI(api_key=GEMINI_API_KEY, base_url="https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest/", default_headers={"x-goog-api-key": GEMINI_API_KEY})
     
+    messages = chat_history if chat_history else []
+    messages.append({"role": "user", "content": prompt})
+
     try:
-        # TODO: Add tool_choice and function_call support
         response = client.chat.completions.create(
             model=GEMINI_MODEL_ONLINE,
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=200, # Limit response for Meshtastic
+            messages=messages,
+            tools=llm_tools, # 傳遞工具宣告
+            tool_choice="auto", # 讓 Gemini 自行決定是否使用工具
+            max_tokens=200, 
             temperature=0.7,
         )
-        return response.choices[0].message.content
+        return response.choices[0].message
     except Exception as e:
-        return f"❌ Gemini API 錯誤: {e}"
+        return {"content": f"❌ Gemini API 錯誤: {e}"}
 
-def call_local_llm(prompt):
+def call_local_llm(prompt, chat_history=None):
     """呼叫本地 LLM (離線模式) - 嘗試 LM Studio, 若失敗則嘗試 Ollama"""
-    # --- 嘗試 LM Studio --- #
+    # 優先使用 LM Studio
     if LOCAL_LLM_API_BASE and LOCAL_LLM_MODEL:
         try:
             from openai import OpenAI
-            client = OpenAI(base_url=LOCAL_LLM_API_BASE, api_key="not-needed") # LM Studio doesn't need API key
+            client = OpenAI(base_url=LOCAL_LLM_API_BASE, api_key="not-needed")
+            messages = chat_history if chat_history else []
+            messages.append({"role": "user", "content": prompt})
+
             response = client.chat.completions.create(
                 model=LOCAL_LLM_MODEL,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=200, # Limit response for Meshtastic
+                messages=messages,
+                tools=llm_tools,
+                tool_choice="auto",
+                max_tokens=200,
                 temperature=0.7,
             )
-            return f"[LM Studio] {response.choices[0].message.content}"
+            return {"content": f"[LM Studio] {response.choices[0].message.content}"}
         except Exception as e:
             print(f"LM Studio 連線失敗或錯誤: {e}", file=sys.stderr)
 
-    # --- 嘗試 Ollama --- #
+    # 其次 Ollama
     if LOCAL_LLM_OLLAMA_API_BASE and LOCAL_LLM_OLLAMA_MODEL:
         try:
             from ollama import Client
             client = Client(host=LOCAL_LLM_OLLAMA_API_BASE)
+            messages = chat_history if chat_history else []
+            messages.append({'role': 'user', 'content': prompt})
+
             response = client.chat(
                 model=LOCAL_LLM_OLLAMA_MODEL,
-                messages=[
-                    {'role': 'user', 'content': prompt}
-                ],
-                options={'num_predict': 200} # Limit response for Meshtastic
+                messages=messages,
+                tools=llm_tools,
+                tool_choice="auto",
+                options={'num_predict': 200}
             )
-            return f"[Ollama] {response['message']['content']}"
+            return {"content": f"[Ollama] {response['message']['content']}"}
         except Exception as e:
             print(f"Ollama 連線失敗或錯誤: {e}", file=sys.stderr)
     
-    return "❌ 無法連線到任何本地 LLM (請檢查 LM Studio/Ollama 是否運行)"
+    return {"content": "❌ 無法連線到任何本地 LLM (請檢查 LM Studio/Ollama 是否運行)"}
+
+def execute_llm_tool_call(tool_call, is_online, localization_setting):
+    """執行 LLM 的工具調用"""
+    tool_name = tool_call.function.name
+    tool_args = tool_call.function.arguments
+    print(f"LLM 請求執行工具: {tool_name}，參數: {tool_args}")
+
+    script_path = None
+    if localization_setting == 'TW':
+        if tool_name == "find_parking":
+            script_path = Path(__file__).parent / "tools" / "taiwan" / "parking_query.py"
+            if not is_online: # 停車查詢需要網路
+                return {"tool_output": "❌ 停車查詢需要網路，目前離線無法使用。"}
+        elif tool_name == "query_surf_spots":
+            script_path = Path(__file__).parent / "tools" / "taiwan" / "surf_query.py"
+
+    if not script_path or not script_path.exists():
+        return {"tool_output": f"❌ 找不到工具腳本或工具未配置: {tool_name}"}
+    
+    cmd = ["python3", str(script_path)]
+    for arg, value in tool_args.items():
+        cmd.extend([f"--{arg}", str(value)])
+    
+    # 為衝浪查詢在離線時加上額外參數，讓它知道 CWA API 無法使用
+    if tool_name == "query_surf_spots" and not is_online:
+        cmd.extend(["--offline-cwa"])
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        return {"tool_output": result.stdout}
+    except subprocess.CalledProcessError as e:
+        return {"tool_output": f"❌ 工具執行錯誤: {e.stderr}"}
+    except Exception as e:
+        return {"tool_output": f"❌ 工具執行發生未預期錯誤: {e}"}
 
 # --- Main Logic ---
 
@@ -138,72 +180,52 @@ def handle_incoming_meshtastic_message(sender_id, text_message):
     internet_status = "🟢 Online" if check_internet_connection() else "🔴 Offline"
     print(f"處理來自 {sender_id} 的訊息: '{text_message}' - 網路狀態: {internet_status}")
 
-    response_text = ""
-    prompt = text_message
+    chat_history = [] # TODO: Implement persistent chat history for context
     
-    # --- 本地知識庫 (RAG) 處理 (新增功能) ---
-    rag_context = ""
-    if not internet_connected: # 只有離線時才進行本地 RAG
-        print("離線模式下，進行本地知識庫檢索...")
-        try:
-            from langchain_community.document_loaders import TextLoader, PyPDFLoader, UnstructuredMarkdownLoader
-            from langchain.text_splitter import RecursiveCharacterTextSplitter
-            from langchain_community.embeddings import OllamaEmbeddings, OpenAIEmbeddings # For LM Studio/Ollama
-            from langchain.vectorstores import Chroma
-            
-            KB_DIR = Path(__file__).parent / "knowledge_base"
-            if not KB_DIR.exists() or not any(KB_DIR.iterdir()):
-                rag_context = "[本地知識庫為空，無法檢索]"
-            else:
-                documents = []
-                for f_path in KB_DIR.iterdir():
-                    if f_path.suffix == ".txt":
-                        loader = TextLoader(str(f_path))
-                    elif f_path.suffix == ".md":
-                        loader = UnstructuredMarkdownLoader(str(f_path))
-                    elif f_path.suffix == ".pdf":
-                        loader = PyPDFLoader(str(f_path))
-                    else:
-                        continue
-                    documents.extend(loader.load())
+    response_message = None
+    tool_outputs = []
 
-                text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-                texts = text_splitter.split_documents(documents)
-
-                # 選擇 Embedding 模型
-                embeddings = None
-                if LOCAL_LLM_API_BASE and LOCAL_LLM_MODEL: # 優先使用 LM Studio 的 OpenAI 相容 Embedding
-                    embeddings = OpenAIEmbeddings(base_url=LOCAL_LLM_API_BASE, api_key="not-needed", model=LOCAL_LLM_MODEL)
-                elif LOCAL_LLM_OLLAMA_API_BASE and LOCAL_LLM_OLLAMA_MODEL: # 其次 Ollama
-                    embeddings = OllamaEmbeddings(base_url=LOCAL_LLM_OLLAMA_API_BASE, model=LOCAL_LLM_OLLAMA_MODEL)
-                
-                if embeddings:
-                    vectorstore = Chroma.from_documents(texts, embeddings, persist_directory=str(KB_DIR / "chroma_db"))
-                    retriever = vectorstore.as_retriever()
-                    
-                    # 執行檢索
-                    retrieved_docs = retriever.invoke(prompt)
-                    rag_context = "\n\n[本地資料參考]\n" + "\n---\n".join([doc.page_content for doc in retrieved_docs[:2]]) # 取前2個相關文檔
-                else:
-                    rag_context = "[未設定 Embedding 模型，無法進行 RAG]"
-        except ImportError:
-            rag_context = "[缺少 Langchain RAG 相關套件，請安裝：pip install langchain-community pypdf unstructured openai ollama chromadb]
-"        except Exception as e:
-            rag_context = f"[本地知識庫檢索錯誤: {e}]"
-
-    # 2. 根據網路狀態選擇 LLM
+    # 2. 根據網路狀態選擇 LLM 並進行第一次呼叫
     if internet_connected:
         print("使用 Google Gemini API (在線模式)...")
-        # 在線模式，Gemini 會自行處理搜尋
-        response_text = call_gemini_api_online(prompt)
+        response_message = call_gemini_api_online(text_message, chat_history)
     else:
         print("使用本地 LLM (離線模式)...")
-        # 將檢索到的上下文加入 prompt
-        llm_prompt = f"{prompt}\n\n{rag_context}"
-        response_text = call_local_llm(llm_prompt)
+        # 將 RAG 上下文加入 prompt，再進行本地 LLM 呼叫
+        rag_context = ""
+        # TODO: Integrate RAG here as part of the local LLM call or as a separate step
+        llm_prompt = text_message # Placeholder
+        response_message = call_local_llm(llm_prompt, chat_history)
     
-    # 3. 發送回覆 (處理長度限制)
-    send_meshtastic_message(f"AI: {response_text}", destination_id=sender_id)
+    # 3. 處理 LLM 的回覆
+    final_response_text = ""
+
+    if response_message.tool_calls:
+        for tool_call in response_message.tool_calls:
+            output = execute_llm_tool_call(tool_call, internet_connected, LOCALIZATION)
+            tool_outputs.append(output) # 儲存工具輸出
+            print(f"工具 {tool_call.function.name} 執行結果: {output}")
+        
+        # 將工具輸出回傳給 LLM 進行第二次呼叫，獲取最終答案
+        if internet_connected:
+            second_response = call_gemini_api_online(
+                "", # Prompt can be empty for tool response
+                chat_history + [
+                    response_message, # Add LLM's tool call message
+                    {"role": "tool", "content": json.dumps(tool_outputs)} # Add tool outputs
+                ]
+            )
+            final_response_text = second_response.content
+        else:
+            # 離線模式下，本地 LLM 可能需要更明確的 prompt 來處理工具輸出
+            local_tool_prompt = f"你剛才執行了工具，結果是: {json.dumps(tool_outputs)}。請根據此結果回答我的問題，並保持簡潔。\n原始問題: {text_message}"
+            second_response = call_local_llm(local_tool_prompt, chat_history)
+            final_response_text = second_response.content
+    else:
+        final_response_text = response_message.content
+
+    # 4. 發送最終回覆 (處理長度限制)
+    send_meshtastic_message(f"AI: {final_response_text}", destination_id=sender_id)
 
 def main_loop():
     print("Meshtastic LLM Bridge 已啟動。正在監聽 Meshtastic 設備...

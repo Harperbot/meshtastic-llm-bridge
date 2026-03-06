@@ -41,7 +41,7 @@
   - **LM Studio** ([lmstudio.ai](https://lmstudio.ai/))：推薦給新手（圖形化介面）。下載一個**聊天模型**和一個 **Embedding 模型**（例如 `nomic-ai/nomic-embed-text-v1.5`），然後啟動本地伺服器。
   - **Ollama** ([ollama.ai](https://ollama.ai/))：命令列友善。安裝一個**聊天模型**（例如 `ollama run gemma:2b`）和一個 **Embedding 模型**（例如 `ollama run nomic-embed-text`）。確保 Ollama 伺服器正在運行。
 
-## 🔑 帳號與金鑰要求
+## 🔑 帳號與金鑰需求
 
 ### 必要項目
 - **Google AI Studio**：取得 [Gemini API Key](https://aistudio.google.com/app/apikey)，用於在線模式（有免費額度）。
@@ -50,7 +50,35 @@
 - **TDX (交通部資料服務)**：用於台灣停車場查詢。
 - **CWA (中央氣象署開放資料)**：用於台灣衝浪浪點天氣查詢。
 
-## 🚀 安裝指南
+## 🚀 新手友善啟動指南 (一步步教學)
+
+如果您從未玩過硬體或寫過程式，請按照以下步驟操作：
+
+### 第一步：準備環境
+1. **安裝軟體**：前往 [nodejs.org](https://nodejs.org/) 與 [python.org](https://www.python.org/) 下載並安裝。
+2. **連接硬體**：將您的 Meshtastic 設備用 USB 線接到電腦。
+3. **確認路徑**：開啟終端機，輸入 `ls /dev/cu.usb*` (Mac) 或 `ls /dev/ttyUSB*` (Linux)，會看到一串像 `/dev/cu.usbserial-1410` 的文字，這就是您的設備路徑。
+
+### 第二步：取得免費金鑰
+1. **Gemini 金鑰**：登入 [Google AI Studio](https://aistudio.google.com/app/apikey) 建立 API Key。
+2. **您的使用者 ID**：在 Telegram 搜尋 `@userinfobot` 並傳訊息給它，拿到您的數字 ID (用於警報廣播)。
+
+### 第三步：設定與執行
+1. **下載程式碼**：點擊網頁綠色按鈕 `Code` -> `Download ZIP` 並解壓縮。
+2. **進入資料夾**：開啟終端機，輸入 `cd `（後面有一個空格），然後將資料夾**直接拖進**終端機視窗，按下 Enter。
+3. **建立虛擬環境**：輸入以下三行指令：
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate
+   pip install "meshtastic[cli]" requests python-dotenv openai ollama langchain-community pypdf unstructured chromadb
+   ```
+4. **設定金鑰**：建立一個名為 `.env` 的檔案，把您的金鑰與設備路徑填進去。
+5. **啟動本地大腦**：開啟 LM Studio，下載模型並點擊 **Start Server**。
+6. **啟動橋接器**：輸入 `python3 bridge.py` 即可啟動！
+
+---
+
+## 🚀 安裝指南 (開發者適用)
 
 ### 1. 複製專案
 ```bash

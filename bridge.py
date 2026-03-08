@@ -7,6 +7,7 @@ from pathlib import Path
 import json
 import subprocess
 import threading
+import types
 
 # Meshtastic CLI is assumed to be installed in the virtual environment
 # import meshtastic.serial_interface
@@ -35,6 +36,45 @@ processed_alert_ids = set() # 用於儲存已處理過的警報 ID
 NCDR_CAP_URL = "https://alerts.ncdr.nat.gov.tw/CAP/Atom.aspx"
 ALERT_CHECK_INTERVAL = 60 # 每 60 秒檢查一次警報
 
+# 網路狀態全域變數（需在 check_internet_connection 使用前初始化）
+internet_connected = False
+last_internet_check = 0.0
+ONLINE_CHECK_INTERVAL = 30  # 秒
+
+# LLM 工具宣告（OpenAI function calling 格式）
+llm_tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "find_parking",
+            "description": "查詢指定座標或地點附近的停車場空位（需要網路）",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "lat": {"type": "number", "description": "緯度"},
+                    "lon": {"type": "number", "description": "經度"},
+                    "location_name": {"type": "string", "description": "地點名稱（與座標二擇一）"}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_surf_spots",
+            "description": "查詢台灣衝浪浪點潮汐、風況等資訊",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "浪點名稱或 'all' 列出全部"},
+                    "lat": {"type": "number", "description": "緯度（用於搜尋附近浪點）"},
+                    "lon": {"type": "number", "description": "經度（用於搜尋附近浪點）"}
+                }
+            }
+        }
+    }
+]
+
 def fetch_and_broadcast_ncdr_alerts():
     """抓取 NCDR 災害警報並透過 Meshtastic 廣播"""
     if not check_internet_connection():
@@ -47,14 +87,14 @@ def fetch_and_broadcast_ncdr_alerts():
         for entry in feed.entries:
             if entry.id not in processed_alert_ids:
                 # 解析 CAP (Common Alerting Protocol) 格式
-                severity = entry.cap_severity.lower()
-                urgency = entry.cap_urgency.lower()
-                event = entry.cap_event
-                
+                severity = getattr(entry, 'cap_severity', '').lower()
+                urgency = getattr(entry, 'cap_urgency', '').lower()
+                event = getattr(entry, 'cap_event', '未知事件')
+
                 # 只廣播嚴重/緊急的警報
                 if severity in ["severe", "extreme"] and urgency in ["immediate", "expected"]:
-                    title = entry.title
-                    summary = entry.summary
+                    title = getattr(entry, 'title', '無標題')
+                    summary = getattr(entry, 'summary', '無摘要')
                     
                     # 格式化成簡短訊息
                     alert_text = f"🚨 緊急警報: [{event}] {title} - {summary}"
@@ -237,6 +277,12 @@ def get_node_location(node_id_to_find):
     except Exception as e:
         return None, str(e)
 
+def _get_content(msg):
+    """統一取得 LLM 回傳的文字內容，相容 object 和 dict 格式"""
+    if isinstance(msg, dict):
+        return msg.get("content", "")
+    return getattr(msg, "content", "") or ""
+
 # --- Main Logic ---
 
 def handle_incoming_meshtastic_message(sender_id, text_message):
@@ -251,8 +297,11 @@ def handle_incoming_meshtastic_message(sender_id, text_message):
             send_meshtastic_message(f"❌ 無法獲取您的 GPS 位置: {error_msg}", destination_id=sender_id)
             return
 
+        _tc = types.SimpleNamespace(
+            function=types.SimpleNamespace(name="query_surf_spots", arguments={"lat": lat, "lon": lon})
+        )
         tool_result = execute_llm_tool_call(
-            {"function": {"name": "query_surf_spots", "arguments": {"lat": lat, "lon": lon}}},
+            _tc,
             check_internet_connection(),
             LOCALIZATION
         )
@@ -297,20 +346,19 @@ def handle_incoming_meshtastic_message(sender_id, text_message):
                     {"role": "tool", "content": json.dumps(tool_outputs)}
                 ]
             )
-            final_response_text = second_response.content
+            final_response_text = _get_content(second_response)
         else:
             local_tool_prompt = f"你剛才執行了工具，結果是: {json.dumps(tool_outputs)}。請根據此結果回答我的問題，並保持簡潔。\n原始問題: {text_message}"
             second_response = call_local_llm(local_tool_prompt, chat_history)
-            final_response_text = second_response.content
+            final_response_text = _get_content(second_response)
     else:
-        final_response_text = response_message.content
+        final_response_text = _get_content(response_message)
 
     # 4. 發送最終回覆 (處理長度限制)
     send_meshtastic_message(f"AI: {final_response_text}", destination_id=sender_id)
 
 def main_loop():
-    print("Meshtastic LLM Bridge 已啟動。正在監聽 Meshtastic 設備...
-")
+    print("Meshtastic LLM Bridge 已啟動。正在監聽 Meshtastic 設備...")
     print(f"本地工具路徑: {os.getcwd()}/tools/taiwan/")
     print("請確保您的 Meshtastic 設備已連接並開啟電源。")
 

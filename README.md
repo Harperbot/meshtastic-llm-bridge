@@ -16,9 +16,10 @@ It intelligently switches between online (Google Gemini) and offline (Local LLMs
 - **GPS-Aware Weather Queries**: Send a simple command like `"weather here"` from your device, and the bridge will automatically use your node's GPS location to fetch the local weather forecast, leveraging the `query_surf_spots` tool. No manual coordinates needed!
 - **Government Alert Broadcast**: In online mode, the bridge actively monitors Taiwan's NCDR (National Science and Technology Center for Disaster Reduction) CAP feed. If a severe alert (earthquake, typhoon, air raid, etc.) is issued, it will be automatically broadcast to all devices on the mesh network (`^all`).
 - **Local Knowledge Base (RAG)**: In offline mode, the LLM can query a local `knowledge_base/` of documents (PDFs, Markdown, text files) to provide informed answers. This is crucial for offline survival and reference.
-- **Smart Tool Integration**: Seamlessly integrates `find_parking` (parking query) and `query_surf_spots` (surf/weather query) tools.
+- **Smart Tool Integration**: Seamlessly integrates `find_parking` (parking query) and `query_surf_spots` (surf/weather query) tools, declared using OpenAI function calling format for robust LLM dispatch.
   - **`find_parking`**: Works when online; returns an "offline" message if the internet is down.
   - **`query_surf_spots`**: Provides general surf spot info and calculates sunrise/sunset offline. Real-time tide, wind, and typhoon data are only available when online with a configured CWA API key.
+- **Robust LLM Response Handling**: Compatible with both object-style and dict-style LLM responses via unified `_get_content()` helper, ensuring stability across different OpenAI-compatible backends.
 - **Meshtastic Communication**: Utilizes the Meshtastic CLI for sending and receiving messages over LoRa mesh networks.
 - **Message Chunking & Pagination**: Automatically splits long LLM responses into multiple Meshtastic packets with pagination (`(1/3)`) due to LoRa's limited payload size.
 - **Resource Optimization**: Designed for low-bandwidth, low-power Meshtastic networks.
@@ -54,7 +55,7 @@ Most LLM solutions rely entirely on internet connectivity. **Meshtastic-LLM Brid
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/yourusername/meshtastic-llm-bridge.git
+git clone https://github.com/Harperbot/meshtastic-llm-bridge.git
 cd meshtastic-llm-bridge
 ```
 

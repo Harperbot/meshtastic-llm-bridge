@@ -39,6 +39,41 @@ def test_send_meshtastic_message_chunks_long_text(monkeypatch):
     assert fake.sent_texts[0][0].startswith("(1/3)")
 
 
+def test_send_meshtastic_message_returns_true_on_success(monkeypatch):
+    fake = FakeInterface()
+    monkeypatch.setattr(bridge, "_interface", fake)
+    monkeypatch.setattr(bridge.time, "sleep", lambda *_: None)
+
+    result = bridge.send_meshtastic_message("hello", destination_id="!abc123")
+
+    assert result is True
+
+
+def test_send_meshtastic_message_returns_false_when_interface_none(monkeypatch):
+    monkeypatch.setattr(bridge, "_interface", None)
+
+    result = bridge.send_meshtastic_message("hello", destination_id="!abc123")
+
+    assert result is False
+
+
+def test_send_meshtastic_alert_returns_true_on_success(monkeypatch):
+    fake = FakeInterface()
+    monkeypatch.setattr(bridge, "_interface", fake)
+
+    result = bridge.send_meshtastic_alert("hello", destination_id="!abc123")
+
+    assert result is True
+
+
+def test_send_meshtastic_alert_returns_false_when_interface_none(monkeypatch):
+    monkeypatch.setattr(bridge, "_interface", None)
+
+    result = bridge.send_meshtastic_alert("hello", destination_id="!abc123")
+
+    assert result is False
+
+
 def test_get_node_location_reads_from_interface_nodes(monkeypatch):
     fake = FakeInterface()
     fake.nodes["!d2d2a4e4"] = {"position": {"latitude": 25.03, "longitude": 121.56}}

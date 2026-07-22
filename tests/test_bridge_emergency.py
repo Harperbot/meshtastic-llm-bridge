@@ -96,3 +96,26 @@ def test_handle_emergency_broadcast_releases_cooldown_on_send_failure(monkeypatc
 
     # 因此立即重試也應被允許（不應被前一次失敗的嘗試卡住）
     assert bridge._cooldown_allows("!d2d2a4e4", bridge._last_sos_ts, 60) is True
+
+
+def test_handle_emergency_broadcast_releases_cooldown_when_interface_disconnected(monkeypatch, capsys):
+    """_interface is None（reconnect window）時 send_meshtastic_alert 靜默 return False，
+    不應被當成「廣播成功」：cooldown 必須釋放，且不能印出誤導性的成功訊息。"""
+    fake_time = [1000.0]
+    monkeypatch.setattr(bridge.time, "time", lambda: fake_time[0])
+    monkeypatch.setattr(bridge, "get_node_location", lambda node_id: ((25.0, 121.0), None))
+    monkeypatch.setattr(bridge, "_interface", None)
+    monkeypatch.setattr(bridge, "_last_sos_ts", {})
+
+    bridge._handle_emergency_broadcast("sos", "!d2d2a4e4", "test")
+
+    # cooldown 必須被釋放，node 不應殘留在 timestamp map 內
+    assert "!d2d2a4e4" not in bridge._last_sos_ts
+
+    # 立即重試應被允許
+    assert bridge._cooldown_allows("!d2d2a4e4", bridge._last_sos_ts, 60) is True
+
+    # 不應印出誤導性的「廣播成功」訊息
+    captured = capsys.readouterr()
+    assert "廣播成功" not in captured.out
+    assert "廣播成功" not in captured.err

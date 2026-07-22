@@ -171,10 +171,16 @@ def _handle_emergency_broadcast(kind: str, sender_id: str, extra_text: str):
 
     try:
         if kind == "sos":
-            send_meshtastic_alert(broadcast_text, destination_id="^all")
+            sent = send_meshtastic_alert(broadcast_text, destination_id="^all")
         else:
-            send_meshtastic_message(broadcast_text, destination_id="^all")
-        print(f"{kind.upper()} 廣播成功: {broadcast_text}")
+            sent = send_meshtastic_message(broadcast_text, destination_id="^all")
+        if sent:
+            print(f"{kind.upper()} 廣播成功: {broadcast_text}")
+        else:
+            # interface 尚未連線（例如 reconnect window 中），完全沒有嘗試發送，
+            # 不能當成功：釋放 cooldown 讓下次可立即重試
+            last_ts_map.pop(sender_id, None)
+            print(f"❌ {kind.upper()} 廣播失敗：Meshtastic 介面尚未連線", file=sys.stderr)
     except Exception as e:
         last_ts_map.pop(sender_id, None)  # 傳送失敗，釋放 cooldown 讓下次可立即重試
         print(f"❌ {kind.upper()} 廣播失敗: {e}", file=sys.stderr)
@@ -197,11 +203,16 @@ def check_internet_connection():
     return internet_connected
 
 def send_meshtastic_message(text, destination_id=None, reply_id=None):
-    """透過 Meshtastic Python API 發送文字訊息，處理長訊息切分"""
+    """透過 Meshtastic Python API 發送文字訊息，處理長訊息切分
+
+    Returns:
+        bool: True 表示已對已連線的 interface 送出（不代表 mesh 上真的送達）；
+              False 表示 interface 尚未連線，完全沒有嘗試發送。
+    """
     global _interface
     if _interface is None:
         print("❌ 無法發送：Meshtastic 介面尚未連線", file=sys.stderr)
-        return
+        return False
     chunks = [text[i:i+MAX_MESHTASTIC_PAYLOAD] for i in range(0, len(text), MAX_MESHTASTIC_PAYLOAD)]
     dest = destination_id if destination_id else "^all"
 
@@ -217,17 +228,25 @@ def send_meshtastic_message(text, destination_id=None, reply_id=None):
         _interface.sendText(chunk, **kwargs)
         time.sleep(1)  # Avoid flooding the mesh
 
+    return True
+
 
 def send_meshtastic_alert(text, destination_id=None):
-    """透過 Meshtastic Python API 發送 ALERT_APP 高優先權訊息（不分段，過長截斷，UTF-8 位元組安全）"""
+    """透過 Meshtastic Python API 發送 ALERT_APP 高優先權訊息（不分段，過長截斷，UTF-8 位元組安全）
+
+    Returns:
+        bool: True 表示已對已連線的 interface 送出（不代表 mesh 上真的送達）；
+              False 表示 interface 尚未連線，完全沒有嘗試發送。
+    """
     global _interface
     if _interface is None:
         print("❌ 無法發送：Meshtastic 介面尚未連線", file=sys.stderr)
-        return
+        return False
     dest = destination_id if destination_id else "^all"
     truncated = text.encode("utf-8")[:MAX_MESHTASTIC_PAYLOAD].decode("utf-8", errors="ignore")
     print(f"Sending Meshtastic ALERT to {dest}: {truncated}")
     _interface.sendAlert(truncated, destinationId=dest)
+    return True
 
 def call_gemini_api_online(prompt, chat_history=None):
     """呼叫 Google Gemini API (在線模式) """

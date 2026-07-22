@@ -415,6 +415,58 @@ def execute_llm_tool_call(tool_call, is_online, localization_setting):
     except Exception as e:
         return {"tool_output": f"❌ 工具執行發生未預期錯誤: {e}"}
 
+def _build_openai_client(base_url, api_key):
+    """獨立包一層方便測試 monkeypatch，避免每個呼叫點都要 import+建構"""
+    from openai import OpenAI
+    return OpenAI(base_url=base_url, api_key=api_key)
+
+
+def call_openai_compat_provider(provider_config, prompt, chat_history, is_online):
+    """呼叫任意 OpenAI-compatible provider（雲端具名服務或本地任意 backend 共用）。
+    成功回傳最終文字；失敗 raise（供 fallback 迴圈捕捉）。
+    """
+    client = _build_openai_client(provider_config["base_url"], provider_config["api_key"])
+    messages = chat_history if chat_history is not None else []
+    messages.append({"role": "user", "content": prompt})
+
+    response = client.chat.completions.create(
+        model=provider_config["model"],
+        messages=messages,
+        tools=llm_tools,
+        tool_choice="auto",
+        max_tokens=200,
+        temperature=0.7,
+    )
+    message = response.choices[0].message
+
+    if not message.tool_calls:
+        return message.content or ""
+
+    messages.append({
+        "role": "assistant",
+        "content": message.content,
+        "tool_calls": message.tool_calls,
+    })
+    for tool_call in message.tool_calls:
+        output = execute_llm_tool_call(tool_call, is_online, LOCALIZATION)
+        print(f"工具 {tool_call.function.name} 執行結果: {output}")
+        messages.append({
+            "role": "tool",
+            "tool_call_id": tool_call.id,
+            "content": json.dumps(output),
+        })
+
+    second_response = client.chat.completions.create(
+        model=provider_config["model"],
+        messages=messages,
+        tools=llm_tools,
+        tool_choice="auto",
+        max_tokens=200,
+        temperature=0.7,
+    )
+    return second_response.choices[0].message.content or ""
+
+
 def get_node_location(node_id_to_find):
     """從 interface.nodes 讀取指定節點的 GPS 位置"""
     global _interface

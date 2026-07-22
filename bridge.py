@@ -176,6 +176,7 @@ def _handle_emergency_broadcast(kind: str, sender_id: str, extra_text: str):
             send_meshtastic_message(broadcast_text, destination_id="^all")
         print(f"{kind.upper()} 廣播成功: {broadcast_text}")
     except Exception as e:
+        last_ts_map.pop(sender_id, None)  # 傳送失敗，釋放 cooldown 讓下次可立即重試
         print(f"❌ {kind.upper()} 廣播失敗: {e}", file=sys.stderr)
 
 MAX_MESHTASTIC_PAYLOAD = 220 # Roughly 220 bytes for plain text on Meshtastic LoRa

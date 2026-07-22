@@ -75,3 +75,24 @@ def test_handle_emergency_broadcast_suppressed_within_cooldown(monkeypatch, caps
     bridge._handle_emergency_broadcast("sos", "!d2d2a4e4", "第二次")
 
     assert len(sent) == 0
+
+
+def test_handle_emergency_broadcast_releases_cooldown_on_send_failure(monkeypatch):
+    """傳送失敗（例如 reconnect window 造成的暫時性例外）不該讓 cooldown 卡住下一次真正的 SOS 重試。"""
+    fake_time = [1000.0]
+    monkeypatch.setattr(bridge.time, "time", lambda: fake_time[0])
+    monkeypatch.setattr(bridge, "get_node_location", lambda node_id: ((25.0, 121.0), None))
+
+    def _raise_alert(text, destination_id):
+        raise RuntimeError("radio not connected")
+
+    monkeypatch.setattr(bridge, "send_meshtastic_alert", _raise_alert)
+    monkeypatch.setattr(bridge, "_last_sos_ts", {})
+
+    bridge._handle_emergency_broadcast("sos", "!d2d2a4e4", "受困")
+
+    # 傳送失敗後，cooldown 必須被釋放，node 不應殘留在 timestamp map 內
+    assert "!d2d2a4e4" not in bridge._last_sos_ts
+
+    # 因此立即重試也應被允許（不應被前一次失敗的嘗試卡住）
+    assert bridge._cooldown_allows("!d2d2a4e4", bridge._last_sos_ts, 60) is True

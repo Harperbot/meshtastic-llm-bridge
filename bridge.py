@@ -127,6 +127,9 @@ def check_internet_connection():
 def send_meshtastic_message(text, destination_id=None, reply_id=None):
     """透過 Meshtastic Python API 發送文字訊息，處理長訊息切分"""
     global _interface
+    if _interface is None:
+        print("❌ 無法發送：Meshtastic 介面尚未連線", file=sys.stderr)
+        return
     chunks = [text[i:i+MAX_MESHTASTIC_PAYLOAD] for i in range(0, len(text), MAX_MESHTASTIC_PAYLOAD)]
     dest = destination_id if destination_id else "^all"
 
@@ -144,10 +147,13 @@ def send_meshtastic_message(text, destination_id=None, reply_id=None):
 
 
 def send_meshtastic_alert(text, destination_id=None):
-    """透過 Meshtastic Python API 發送 ALERT_APP 高優先權訊息（不分段，過長截斷）"""
+    """透過 Meshtastic Python API 發送 ALERT_APP 高優先權訊息（不分段，過長截斷，UTF-8 位元組安全）"""
     global _interface
+    if _interface is None:
+        print("❌ 無法發送：Meshtastic 介面尚未連線", file=sys.stderr)
+        return
     dest = destination_id if destination_id else "^all"
-    truncated = text[:MAX_MESHTASTIC_PAYLOAD]
+    truncated = text.encode("utf-8")[:MAX_MESHTASTIC_PAYLOAD].decode("utf-8", errors="ignore")
     print(f"Sending Meshtastic ALERT to {dest}: {truncated}")
     _interface.sendAlert(truncated, destinationId=dest)
 

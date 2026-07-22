@@ -62,6 +62,36 @@ def test_get_node_location_missing_position_returns_error(monkeypatch):
     assert error is not None
 
 
+def test_send_meshtastic_message_noop_when_interface_none(monkeypatch, capsys):
+    monkeypatch.setattr(bridge, "_interface", None)
+
+    bridge.send_meshtastic_message("hello", destination_id="!abc123")
+
+    captured = capsys.readouterr()
+    assert "尚未連線" in captured.err
+
+
+def test_send_meshtastic_alert_noop_when_interface_none(monkeypatch, capsys):
+    monkeypatch.setattr(bridge, "_interface", None)
+
+    bridge.send_meshtastic_alert("urgent", destination_id="!abc123")
+
+    captured = capsys.readouterr()
+    assert "尚未連線" in captured.err
+
+
+def test_send_meshtastic_alert_truncates_by_utf8_bytes_not_chars(monkeypatch):
+    fake = FakeInterface()
+    monkeypatch.setattr(bridge, "_interface", fake)
+
+    long_chinese_text = "緊急警報請立即撤離" * 40  # far more than 220 bytes in UTF-8
+    bridge.send_meshtastic_alert(long_chinese_text, destination_id="^all")
+
+    assert len(fake.sent_alerts) == 1
+    sent_text = fake.sent_alerts[0][0]
+    assert len(sent_text.encode("utf-8")) <= bridge.MAX_MESHTASTIC_PAYLOAD
+
+
 def test_on_receive_dispatches_to_handler(monkeypatch):
     calls = []
     monkeypatch.setattr(

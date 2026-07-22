@@ -24,13 +24,13 @@ LOCALIZATION = os.getenv("LOCALIZATION", "TW")
 
 # Google Gemini API (Online Mode)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL_ONLINE = os.getenv("GEMINI_MODEL_ONLINE", "gemini-1.5-pro-latest") # Use a strong model for online
+GEMINI_MODEL_ONLINE = os.getenv("GEMINI_MODEL_ONLINE", "gemini-flash-latest") # Use a strong model for online (rolling alias, 2026-06-17 後自動指向 3.x)
 
 # Local LLM (Offline Mode) - LM Studio or Ollama
 LOCAL_LLM_API_BASE = os.getenv("LOCAL_LLM_API_BASE", "http://localhost:1234/v1") # LM Studio default
-LOCAL_LLM_MODEL = os.getenv("LOCAL_LLM_MODEL", "model-name-from-lm-studio-or-ollama")
-LOCAL_LLM_OLLAMA_API_BASE = os.getenv("LOCAL_LLM_OLLAMA_API_BASE", "http://localhost:11434/api")
-LOCAL_LLM_OLLAMA_MODEL = os.getenv("LOCAL_LLM_OLLAMA_MODEL", "gemma:2b")
+LOCAL_LLM_MODEL = os.getenv("LOCAL_LLM_MODEL", "llama4-scout-openclaw:iq2")
+LOCAL_LLM_OLLAMA_API_BASE = os.getenv("LOCAL_LLM_OLLAMA_API_BASE", "http://0.0.0.0:11434/api")
+LOCAL_LLM_OLLAMA_MODEL = os.getenv("LOCAL_LLM_OLLAMA_MODEL", "gpt-oss-openclaw:20b")
 
 processed_alert_ids = set() # 用於儲存已處理過的警報 ID
 NCDR_CAP_URL = "https://alerts.ncdr.nat.gov.tw/CAP/Atom.aspx"
@@ -153,7 +153,7 @@ def send_meshtastic_message(text, destination_id=None, reply_id=None):
 def call_gemini_api_online(prompt, chat_history=None):
     """呼叫 Google Gemini API (在線模式) """
     from openai import OpenAI
-    client = OpenAI(api_key=GEMINI_API_KEY, base_url="https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest/", default_headers={"x-goog-api-key": GEMINI_API_KEY})
+    client = OpenAI(api_key=GEMINI_API_KEY, base_url="https://generativelanguage.googleapis.com/v1beta/openai/", default_headers={"x-goog-api-key": GEMINI_API_KEY})
     
     messages = chat_history if chat_history else []
     messages.append({"role": "user", "content": prompt})

@@ -370,11 +370,30 @@ def _connect_with_retry():
             time.sleep(RECONNECT_DELAY_SECONDS)
 
 
+def _reconnect():
+    """關閉舊連線並重新連線，供 _on_connection_lost 在背景執行緒呼叫"""
+    global _interface
+    if _interface is not None:
+        try:
+            _interface.close()
+        except Exception as e:
+            print(f"關閉舊連線時發生錯誤（忽略，繼續重連）: {e}", file=sys.stderr)
+    _interface = None
+    _connect_with_retry()
+
+
+def _on_connection_lost(interface):
+    """pypubsub callback：偵測到 Meshtastic 連線中斷時觸發"""
+    print("偵測到 Meshtastic 連線中斷，背景執行緒進行重新連線...", file=sys.stderr)
+    threading.Thread(target=_reconnect, daemon=True).start()
+
+
 def main_loop():
     print("Meshtastic LLM Bridge 已啟動（Python API 模式）。正在連線 Meshtastic 裝置...")
     print(f"本地工具路徑: {os.getcwd()}/tools/taiwan/")
 
     pub.subscribe(_on_receive, "meshtastic.receive.text")
+    pub.subscribe(_on_connection_lost, "meshtastic.connection.lost")
     _connect_with_retry()
 
     while True:

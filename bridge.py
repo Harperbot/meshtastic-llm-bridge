@@ -324,70 +324,6 @@ def send_meshtastic_alert(text, destination_id=None):
     _interface.sendAlert(truncated, destinationId=dest)
     return True
 
-def call_gemini_api_online(prompt, chat_history=None):
-    """呼叫 Google Gemini API (在線模式) """
-    from openai import OpenAI
-    client = OpenAI(api_key=GEMINI_API_KEY, base_url="https://generativelanguage.googleapis.com/v1beta/openai/", default_headers={"x-goog-api-key": GEMINI_API_KEY})
-    
-    messages = chat_history if chat_history else []
-    messages.append({"role": "user", "content": prompt})
-
-    try:
-        response = client.chat.completions.create(
-            model=GEMINI_MODEL_ONLINE,
-            messages=messages,
-            tools=llm_tools, # 傳遞工具宣告
-            tool_choice="auto", # 讓 Gemini 自行決定是否使用工具
-            max_tokens=200, 
-            temperature=0.7,
-        )
-        return response.choices[0].message
-    except Exception as e:
-        return {"content": f"❌ Gemini API 錯誤: {e}"}
-
-def call_local_llm(prompt, chat_history=None):
-    """呼叫本地 LLM (離線模式) - 嘗試 LM Studio, 若失敗則嘗試 Ollama"""
-    # 優先使用 LM Studio
-    if LOCAL_LLM_API_BASE and LOCAL_LLM_MODEL:
-        try:
-            from openai import OpenAI
-            client = OpenAI(base_url=LOCAL_LLM_API_BASE, api_key="not-needed")
-            messages = chat_history if chat_history else []
-            messages.append({"role": "user", "content": prompt})
-
-            response = client.chat.completions.create(
-                model=LOCAL_LLM_MODEL,
-                messages=messages,
-                tools=llm_tools,
-                tool_choice="auto",
-                max_tokens=200,
-                temperature=0.7,
-            )
-            return {"content": f"[LM Studio] {response.choices[0].message.content}"}
-        except Exception as e:
-            print(f"LM Studio 連線失敗或錯誤: {e}", file=sys.stderr)
-
-    # 其次 Ollama
-    if LOCAL_LLM_OLLAMA_API_BASE and LOCAL_LLM_OLLAMA_MODEL:
-        try:
-            from ollama import Client
-            client = Client(host=LOCAL_LLM_OLLAMA_API_BASE)
-            messages = chat_history if chat_history else []
-            messages.append({'role': 'user', 'content': prompt})
-
-            response = client.chat(
-                model=LOCAL_LLM_OLLAMA_MODEL,
-                messages=messages,
-                tools=llm_tools,
-                tool_choice="auto",
-                options={'num_predict': 200}
-            )
-            return {"content": f"[Ollama] {response['message']['content']}"}
-        except Exception as e:
-            print(f"Ollama 連線失敗或錯誤: {e}", file=sys.stderr)
-    
-    return {"content": "❌ 無法連線到任何本地 LLM (請檢查 LM Studio/Ollama 是否運行)"}
-
 def execute_llm_tool_call(tool_call, is_online, localization_setting):
     """執行 LLM 的工具調用"""
     tool_name = tool_call.function.name
@@ -534,6 +470,29 @@ def call_anthropic_provider(provider_config, prompt, chat_history, is_online):
     return "".join(block.text for block in second_response.content if block.type == "text")
 
 
+def call_llm_with_fallback(providers, prompt, chat_history, is_online):
+    """依序嘗試 providers 清單，回傳第一個成功的結果；全部失敗則 raise。
+
+    每個 provider 嘗試都拿到 chat_history 的一份「新複製」，而不是同一個 list 物件。
+    call_openai_compat_provider / call_anthropic_provider 兩者都會就地 mutate 傳入的
+    chat_history（append user/assistant/tool 訊息）；若在這裡把同一個 list 物件傳給每個
+    provider，前一個 provider 失敗前留下的部分 mutation（例如工具呼叫階段的 assistant/tool
+    訊息）會污染下一個 provider 的第一次呼叫。因此每次迭代都用 list(chat_history) 建立
+    乾淨副本，確保每個 provider 都是從呼叫者提供的原始狀態開始。
+    """
+    last_error = None
+    for provider in providers:
+        try:
+            provider_chat_history = list(chat_history)
+            if provider["kind"] == "anthropic":
+                return call_anthropic_provider(provider, prompt, provider_chat_history, is_online)
+            return call_openai_compat_provider(provider, prompt, provider_chat_history, is_online)
+        except Exception as e:
+            print(f"Provider {provider.get('label', '?')} 失敗: {e}，嘗試下一家", file=sys.stderr)
+            last_error = e
+    raise RuntimeError(f"所有 LLM provider 皆失敗: {last_error}")
+
+
 def get_node_location(node_id_to_find):
     """從 interface.nodes 讀取指定節點的 GPS 位置"""
     global _interface
@@ -563,12 +522,6 @@ def _on_receive(packet, interface):
             handle_incoming_meshtastic_message(sender_id, text)
     except Exception as e:
         print(f"處理收到訊息時發生錯誤: {e}", file=sys.stderr)
-
-def _get_content(msg):
-    """統一取得 LLM 回傳的文字內容，相容 object 和 dict 格式"""
-    if isinstance(msg, dict):
-        return msg.get("content", "")
-    return getattr(msg, "content", "") or ""
 
 # --- Main Logic ---
 
@@ -610,49 +563,17 @@ def handle_incoming_meshtastic_message(sender_id, text_message):
     internet_status = "🟢 Online" if check_internet_connection() else "🔴 Offline"
     print(f"處理來自 {sender_id} 的訊息: '{text_message}' - 網路狀態: {internet_status}")
 
-    chat_history = [] # TODO: Implement persistent chat history for context
-    
-    response_message = None
-    tool_outputs = []
+    chat_history = []  # TODO: Implement persistent chat history for context
 
-    # 2. 根據網路狀態選擇 LLM 並進行第一次呼叫
-    if internet_connected:
-        print("使用 Google Gemini API (在線模式)...")
-        response_message = call_gemini_api_online(text_message, chat_history)
-    else:
-        print("使用本地 LLM (離線模式)...")
-        rag_context = ""
-        # TODO: Integrate RAG here as part of the local LLM call or as a separate step
-        llm_prompt = text_message # Placeholder
-        response_message = call_local_llm(llm_prompt, chat_history)
-    
-    # 3. 處理 LLM 的回覆
-    final_response_text = ""
-
-    if hasattr(response_message, 'tool_calls') and response_message.tool_calls:
-        for tool_call in response_message.tool_calls:
-            output = execute_llm_tool_call(tool_call, internet_connected, LOCALIZATION)
-            tool_outputs.append(output)
-            print(f"工具 {tool_call.function.name} 執行結果: {output}")
-        
-        # 將工具輸出回傳給 LLM 進行第二次呼叫，獲取最終答案
+    try:
         if internet_connected:
-            second_response = call_gemini_api_online(
-                "", # Prompt can be empty for tool response
-                chat_history + [
-                    {"role": "assistant", "content": None, "tool_calls": response_message.tool_calls},
-                    {"role": "tool", "content": json.dumps(tool_outputs)}
-                ]
-            )
-            final_response_text = _get_content(second_response)
+            final_response_text = call_llm_with_fallback(CLOUD_LLM_PROVIDERS, text_message, chat_history, True)
         else:
-            local_tool_prompt = f"你剛才執行了工具，結果是: {json.dumps(tool_outputs)}。請根據此結果回答我的問題，並保持簡潔。\n原始問題: {text_message}"
-            second_response = call_local_llm(local_tool_prompt, chat_history)
-            final_response_text = _get_content(second_response)
-    else:
-        final_response_text = _get_content(response_message)
+            final_response_text = call_llm_with_fallback(LOCAL_LLM_PROVIDERS, text_message, chat_history, False)
+    except Exception as e:
+        final_response_text = f"❌ 所有 LLM 服務皆無法回應: {e}"
 
-    # 4. 發送最終回覆 (處理長度限制)
+    # 發送最終回覆 (處理長度限制)
     send_meshtastic_message(f"AI: {final_response_text}", destination_id=sender_id)
 
 def _connect_with_retry():

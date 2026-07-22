@@ -161,3 +161,107 @@ def test_call_anthropic_provider_raises_on_client_error(monkeypatch):
         assert False, "應該要 raise"
     except RuntimeError as e:
         assert "Anthropic API 錯誤" in str(e)
+
+
+def test_call_llm_with_fallback_returns_first_success():
+    providers = [{"kind": "openai_compat", "label": "p1"}, {"kind": "openai_compat", "label": "p2"}]
+
+    def fake_openai_compat(provider, prompt, chat_history, is_online):
+        return f"回覆來自 {provider['label']}"
+
+    import bridge
+    orig = bridge.call_openai_compat_provider
+    bridge.call_openai_compat_provider = fake_openai_compat
+    try:
+        result = bridge.call_llm_with_fallback(providers, "test", [], is_online=True)
+    finally:
+        bridge.call_openai_compat_provider = orig
+
+    assert result == "回覆來自 p1"
+
+
+def test_call_llm_with_fallback_tries_next_on_failure(monkeypatch):
+    providers = [
+        {"kind": "openai_compat", "label": "p1"},
+        {"kind": "anthropic", "label": "p2"},
+    ]
+
+    def fake_openai_compat(provider, prompt, chat_history, is_online):
+        raise RuntimeError("p1 掛了")
+
+    def fake_anthropic(provider, prompt, chat_history, is_online):
+        return "來自 p2 的回覆"
+
+    monkeypatch.setattr(bridge, "call_openai_compat_provider", fake_openai_compat)
+    monkeypatch.setattr(bridge, "call_anthropic_provider", fake_anthropic)
+
+    result = bridge.call_llm_with_fallback(providers, "test", [], is_online=True)
+
+    assert result == "來自 p2 的回覆"
+
+
+def test_call_llm_with_fallback_raises_when_all_fail(monkeypatch):
+    providers = [{"kind": "openai_compat", "label": "p1"}]
+
+    def fake_openai_compat(provider, prompt, chat_history, is_online):
+        raise RuntimeError("全部都掛了")
+
+    monkeypatch.setattr(bridge, "call_openai_compat_provider", fake_openai_compat)
+
+    try:
+        bridge.call_llm_with_fallback(providers, "test", [], is_online=True)
+        assert False, "應該要 raise"
+    except RuntimeError as e:
+        assert "全部都掛了" in str(e)
+
+
+def test_call_llm_with_fallback_empty_list_raises():
+    try:
+        bridge.call_llm_with_fallback([], "test", [], is_online=True)
+        assert False, "應該要 raise"
+    except RuntimeError:
+        pass
+
+
+def test_call_llm_with_fallback_does_not_leak_mutated_chat_history_between_providers(monkeypatch):
+    """Task 3/4 review finding: call_openai_compat_provider / call_anthropic_provider both
+    mutate the chat_history list object passed to them in place. If call_llm_with_fallback
+    passes the SAME list object to every provider attempt, a provider that mutates its copy
+    and then fails will pollute what the next provider sees. Each provider attempt must get
+    a fresh copy of the original chat_history.
+    """
+    providers = [
+        {"kind": "openai_compat", "label": "p1"},
+        {"kind": "openai_compat", "label": "p2"},
+    ]
+
+    original_history = [{"role": "user", "content": "先前的訊息"}]
+    received_by_p2 = {}
+
+    def fake_p1(provider, prompt, chat_history, is_online):
+        # simulate in-place mutation like the real provider functions do
+        chat_history.append({"role": "assistant", "content": "p1 的部分回覆", "tool_calls": ["fake"]})
+        raise RuntimeError("p1 掛了（工具呼叫階段失敗）")
+
+    call_count = {"n": 0}
+
+    def fake_p2(provider, prompt, chat_history, is_online):
+        call_count["n"] += 1
+        received_by_p2["history"] = list(chat_history)
+        return "來自 p2 的回覆"
+
+    # both providers are kind=openai_compat in this test, so monkeypatch that single dispatch point
+    def dispatch(provider, prompt, chat_history, is_online):
+        if provider["label"] == "p1":
+            return fake_p1(provider, prompt, chat_history, is_online)
+        return fake_p2(provider, prompt, chat_history, is_online)
+
+    monkeypatch.setattr(bridge, "call_openai_compat_provider", dispatch)
+
+    result = bridge.call_llm_with_fallback(providers, "test", original_history, is_online=True)
+
+    assert result == "來自 p2 的回覆"
+    # p2 must have received a clean copy matching the ORIGINAL history, not p1's mutated version
+    assert received_by_p2["history"] == [{"role": "user", "content": "先前的訊息"}]
+    # the caller's original list object must not have been mutated by p1's failed attempt either
+    assert original_history == [{"role": "user", "content": "先前的訊息"}]

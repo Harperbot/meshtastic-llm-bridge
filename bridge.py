@@ -46,30 +46,15 @@ llm_tools = [
     {
         "type": "function",
         "function": {
-            "name": "find_parking",
-            "description": "查詢指定座標或地點附近的停車場空位（需要網路）",
+            "name": "find_shelter",
+            "description": "查詢指定座標附近的避難收容處所（不需網路，離線可用）",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "lat": {"type": "number", "description": "緯度"},
-                    "lon": {"type": "number", "description": "經度"},
-                    "location_name": {"type": "string", "description": "地點名稱（與座標二擇一）"}
-                }
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "query_surf_spots",
-            "description": "查詢台灣衝浪浪點潮汐、風況等資訊",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "浪點名稱或 'all' 列出全部"},
-                    "lat": {"type": "number", "description": "緯度（用於搜尋附近浪點）"},
-                    "lon": {"type": "number", "description": "經度（用於搜尋附近浪點）"}
-                }
+                    "lon": {"type": "number", "description": "經度"}
+                },
+                "required": ["lat", "lon"]
             }
         }
     }
@@ -222,23 +207,15 @@ def execute_llm_tool_call(tool_call, is_online, localization_setting):
 
     script_path = None
     if localization_setting == 'TW':
-        if tool_name == "find_parking":
-            script_path = Path(__file__).parent / "tools" / "taiwan" / "parking_query.py"
-            if not is_online: # 停車查詢需要網路
-                return {"tool_output": "❌ 停車查詢需要網路，目前離線無法使用。"}
-        elif tool_name == "query_surf_spots":
-            script_path = Path(__file__).parent / "tools" / "taiwan" / "surf_query.py"
+        if tool_name == "find_shelter":
+            script_path = Path(__file__).parent / "tools" / "taiwan" / "shelter_query.py"
 
     if not script_path or not script_path.exists():
         return {"tool_output": f"❌ 找不到工具腳本或工具未配置: {tool_name}"}
-    
+
     cmd = ["python3", str(script_path)]
     for arg, value in tool_args.items():
         cmd.extend([f"--{arg}", str(value)])
-    
-    # 為衝浪查詢在離線時加上額外參數，讓它知道 CWA API 無法使用
-    if tool_name == "query_surf_spots" and not is_online:
-        cmd.extend(["--offline-cwa"])
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -289,7 +266,7 @@ def handle_incoming_meshtastic_message(sender_id, text_message):
     """處理收到的 Meshtastic 訊息"""
     global internet_connected
 
-    # --- GPS 感知天氣查詢 (新增功能) ---
+    # --- GPS 感知天氣查詢 ---
     if "weather here" in text_message.lower() or "附近天氣" in text_message:
         print(f"偵測到 GPS 天氣查詢 from {sender_id}")
         (lat, lon), error_msg = get_node_location(sender_id)
@@ -297,15 +274,15 @@ def handle_incoming_meshtastic_message(sender_id, text_message):
             send_meshtastic_message(f"❌ 無法獲取您的 GPS 位置: {error_msg}", destination_id=sender_id)
             return
 
-        _tc = types.SimpleNamespace(
-            function=types.SimpleNamespace(name="query_surf_spots", arguments={"lat": lat, "lon": lon})
-        )
-        tool_result = execute_llm_tool_call(
-            _tc,
-            check_internet_connection(),
-            LOCALIZATION
-        )
-        send_meshtastic_message(tool_result.get("tool_output", "查詢失敗"), destination_id=sender_id)
+        weather_script = Path(__file__).parent / "tools" / "taiwan" / "weather_query.py"
+        try:
+            result = subprocess.run(
+                ["python3", str(weather_script), "--lat", str(lat), "--lon", str(lon)],
+                capture_output=True, text=True, check=True,
+            )
+            send_meshtastic_message(result.stdout, destination_id=sender_id)
+        except Exception as e:
+            send_meshtastic_message(f"❌ 天氣查詢失敗: {e}", destination_id=sender_id)
         return
 
     # --- 原有 LLM 處理流程 ---

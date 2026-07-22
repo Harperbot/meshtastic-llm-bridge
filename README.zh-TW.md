@@ -73,7 +73,7 @@
    ```bash
    python3 -m venv venv
    source venv/bin/activate
-   pip install meshtastic[cli] requests python-dotenv openai ollama feedparser pytest
+   pip install meshtastic[cli] requests python-dotenv openai anthropic feedparser pytest
    ```
 4. **設定金鑰**：建立一個名為 `.env` 的檔案，把您的金鑰與設備路徑填進去。
 5. **啟動本地大腦**：開啟 LM Studio，下載模型並點擊 **Start Server**。
@@ -96,7 +96,7 @@ python3 -m venv venv
 source venv/bin/activate
 
 # 安裝 Python 依賴套件
-pip install meshtastic[cli] requests python-dotenv openai ollama feedparser pytest
+pip install meshtastic[cli] requests python-dotenv openai anthropic feedparser pytest
 ```
 
 ### 3. Meshtastic 設備設定

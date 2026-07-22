@@ -69,7 +69,7 @@ python3 -m venv venv
 source venv/bin/activate
 
 # Install Python dependencies
-pip install meshtastic[cli] requests python-dotenv openai ollama feedparser pytest
+pip install meshtastic[cli] requests python-dotenv openai anthropic feedparser pytest
 ```
 
 ### 3. Meshtastic Device Setup

@@ -13,24 +13,25 @@ It intelligently switches between online (Google Gemini) and offline (Local LLMs
 - **Dual-Mode LLM Integration**: Automatically detects internet connectivity.
   - **Online Mode**: Connects to Google Gemini API for powerful, internet-enabled AI responses.
   - **Offline Mode**: Seamlessly switches to local LLMs (LM Studio or Ollama) for off-grid AI capabilities.
-- **GPS-Aware Weather Queries**: Send a simple command like `"weather here"` from your device, and the bridge will automatically use your node's GPS location to fetch the local weather forecast, leveraging the `query_surf_spots` tool. No manual coordinates needed!
+- **GPS-Aware Weather Queries**: Send a simple command like `"weather here"` from your device, and the bridge will automatically use your node's GPS location to fetch the local weather forecast. No manual coordinates needed!
 - **Government Alert Broadcast**: In online mode, the bridge actively monitors Taiwan's NCDR (National Science and Technology Center for Disaster Reduction) CAP feed. If a severe alert (earthquake, typhoon, air raid, etc.) is issued, it will be automatically broadcast to all devices on the mesh network (`^all`).
-- **Local Knowledge Base (RAG)**: In offline mode, the LLM can query a local `knowledge_base/` of documents (PDFs, Markdown, text files) to provide informed answers. This is crucial for offline survival and reference.
-- **Smart Tool Integration**: Seamlessly integrates `find_parking` (parking query) and `query_surf_spots` (surf/weather query) tools, declared using OpenAI function calling format for robust LLM dispatch.
-  - **`find_parking`**: Works when online; returns an "offline" message if the internet is down.
-  - **`query_surf_spots`**: Provides general surf spot info and calculates sunrise/sunset offline. Real-time tide, wind, and typhoon data are only available when online with a configured CWA API key.
 - **Robust LLM Response Handling**: Compatible with both object-style and dict-style LLM responses via unified `_get_content()` helper, ensuring stability across different OpenAI-compatible backends.
 - **Meshtastic Communication**: Utilizes the Meshtastic CLI for sending and receiving messages over LoRa mesh networks.
 - **Message Chunking & Pagination**: Automatically splits long LLM responses into multiple Meshtastic packets with pagination (`(1/3)`) due to LoRa's limited payload size.
 - **Resource Optimization**: Designed for low-bandwidth, low-power Meshtastic networks.
 - **Easy Setup**: Runs as a standalone Python script with `.env` configuration.
 
+### Disaster Info Tools
+
+- **Shelter Finder**: Ask about nearby emergency shelters (`find_shelter` LLM tool), backed by Taiwan's National Fire Agency shelter dataset (works offline, no internet required)
+- **SOS Broadcast**: Send `SOS` (optionally followed by a message, e.g. `SOS trapped on 2nd floor`) to broadcast your GPS location and timestamp to the entire mesh via Meshtastic's `ALERT_APP` priority channel. Rate-limited to once per 60 seconds per node to prevent accidental flooding.
+- **Safety Check-in**: Send `SAFE` or `平安` (optionally with a message) to broadcast that you're safe, same rate-limiting applies.
+
 ## 💡 Why this project?
 
 Most LLM solutions rely entirely on internet connectivity. **Meshtastic-LLM Bridge** offers unparalleled resilience:
 - **True Off-Grid AI**: Ensures you always have access to AI assistance, even in emergencies or remote locations without internet.
 - **Hybrid Intelligence**: Leverages the best of both worlds: powerful cloud LLMs when online, and robust local LLMs when offline.
-- **Personal Knowledge Hub**: Turn your local computer into a private, searchable knowledge base for your AI, accessible via LoRa.
 - **Open Source & Customizable**: A foundation for building your own specialized off-grid AI applications.
 
 ## 🖥️ System Requirements
@@ -38,9 +39,9 @@ Most LLM solutions rely entirely on internet connectivity. **Meshtastic-LLM Brid
 - **OS**: Linux, macOS, or Windows (via WSL2).
 - **Python**: v3.9 or higher.
 - **Meshtastic Device**: A working Meshtastic device connected via USB (or configurable for TCP/IP).
-- **Local LLM**: (Essential for offline chat, reasoning, and local RAG embeddings)
-  - **LM Studio** ([lmstudio.ai](https://lmstudio.ai/)): Recommended for ease of use (GUI). Download a **chat model** and an **embedding model** (e.g., `nomic-ai/nomic-embed-text-v1.5`), then start the local server.
-  - **Ollama** ([ollama.ai](https://ollama.ai/)): Command-line friendly. Install a **chat model** (e.g., `ollama run gemma:2b`) and an **embedding model** (e.g., `ollama run nomic-embed-text`). Ensure the Ollama server is running.
+- **Local LLM**: (Essential for offline chat and reasoning)
+  - **LM Studio** ([lmstudio.ai](https://lmstudio.ai/)): Recommended for ease of use (GUI). Download a **chat model**, then start the local server.
+  - **Ollama** ([ollama.ai](https://ollama.ai/)): Command-line friendly. Install a **chat model** (e.g., `ollama run gemma:2b`). Ensure the Ollama server is running.
 
 ## 🔑 Account & Key Requirements
 
@@ -48,8 +49,7 @@ Most LLM solutions rely entirely on internet connectivity. **Meshtastic-LLM Brid
 - **Google AI Studio**: Obtain your [Gemini API Key](https://aistudio.google.com/app/apikey) for online mode (free tier available).
 
 ### Optional (for local tools / specialized functions)
-- **TDX (Transport Data eXchange)**: For parking queries in Taiwan.
-- **CWA Open Data**: For surf spot weather in Taiwan.
+- **CWA Open Data**: For weather forecasts in Taiwan.
 
 ## 🚀 Installation
 
@@ -66,7 +66,7 @@ python3 -m venv venv
 source venv/bin/activate
 
 # Install Python dependencies
-pip install "meshtastic[cli]" requests python-dotenv openai ollama langchain-community pypdf unstructured chromadb
+pip install meshtastic[cli] requests python-dotenv openai ollama feedparser pytest
 ```
 
 ### 3. Meshtastic Device Setup
@@ -77,54 +77,30 @@ pip install "meshtastic[cli]" requests python-dotenv openai ollama langchain-com
 
 #### Option A: LM Studio (Recommended for Beginners)
 1. Download and install [LM Studio](https://lmstudio.ai/).
-2. In LM Studio, download your preferred LLM (e.g., `Nexusflow/Starling-LM-7B-beta-GGUF`) and an Embedding model (e.g., `nomic-ai/nomic-embed-text-v1.5`).
+2. In LM Studio, download your preferred LLM (e.g., `Nexusflow/Starling-LM-7B-beta-GGUF`).
 3. Go to the "Local Server" tab and click "Start Server". Ensure it's running on `http://localhost:1234/v1`.
 
 #### Option B: Ollama
 1. Download and install [Ollama](https://ollama.ai/).
-2. Download your preferred LLM (e.g., `ollama run gemma:2b`) and an Embedding model (e.g., `ollama run nomic-embed-text`).
+2. Download your preferred LLM (e.g., `ollama run gemma:2b`).
 3. Ensure the Ollama server is running (usually automatic after `ollama run`).
 
-### 5. Configure `.env`
-Copy the example file:
-```bash
-cp .env.example .env
+### 5. Configure Environment Variables
+
+Create a `.env` file in the project root with:
+
 ```
-Edit `.env` with your details:
-```ini
-# --- General Configuration ---
-MESHTASTIC_DEVICE_PATH=/dev/cu.usbserial-XXXX # <--- IMPORTANT: Update this!
-MESHTASTIC_LONGNAME=YourMeshAINode
-LOCALIZATION=TW # Set to 'TW' for Taiwan-specific tools, or remove for global LLM
-
-# --- Google Gemini API (Online Mode) ---
-GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL_ONLINE=gemini-1.5-pro-latest
-
-# --- Local LLM (Offline Mode) ---
-# LM Studio Configuration (Priority 1 if enabled)
+MESHTASTIC_DEVICE_PATH=/dev/ttyUSB0
+MESHTASTIC_LONGNAME=MeshtasticAI
+LOCALIZATION=TW
+GEMINI_API_KEY=your_key_here
+GEMINI_MODEL_ONLINE=gemini-flash-latest
 LOCAL_LLM_API_BASE=http://localhost:1234/v1
-LOCAL_LLM_MODEL=Nexusflow/Starling-LM-7B-beta-GGUF # Your downloaded chat model in LM Studio
-
-# Ollama Configuration (Priority 2 if LM Studio fails or is not configured)
+LOCAL_LLM_MODEL=your-local-model-name
 LOCAL_LLM_OLLAMA_API_BASE=http://localhost:11434/api
-LOCAL_LLM_OLLAMA_MODEL=gemma:2b # Your installed Ollama chat model
-
-# Local Embedding Model (for RAG - Retrieval Augmented Generation)
-# Used by Langchain for generating document embeddings when offline.
-# Prioritizes LM Studio if LOCAL_EMBEDDING_API_BASE is set, then Ollama.
-# If using LM Studio, the API base is usually the same as LOCAL_LLM_API_BASE.
-# If using Ollama, ensure you have an embedding model like 'nomic-embed-text' installed ('ollama run nomic-embed-text').
-LOCAL_EMBEDDING_API_BASE=http://localhost:1234/v1 # e.g., LM Studio Embedding API
-LOCAL_EMBEDDING_MODEL=nomic-ai/nomic-embed-text-v1.5 # e.g., your downloaded Embedding model
+LOCAL_LLM_OLLAMA_MODEL=your-ollama-model-name
+CWA_API_KEY=your_cwa_key_here
 ```
-
-### 6. Build Your Local Knowledge Base (for Offline RAG)
-
-Place your documents (e.g., survival guides, manuals, Wikipedia exports) into the `./knowledge_base/` directory.
-Supported formats: `.txt`, `.md`, `.pdf`.
-
-Each time you add/remove documents, or update the Embedding model, restart `bridge.py` to rebuild the vector database.
 
 ## 🎮 Usage
 
@@ -133,7 +109,7 @@ Each time you add/remove documents, or update the Embedding model, restart `brid
 3. Activate your Python virtual environment: `source venv/bin/activate`
 4. Run the bridge: `python3 bridge.py`
 
-Now, send messages to your AI node (e.g., `YourMeshAINode`) from your Meshtastic mobile app. The bridge will intelligently route your query to Gemini (online) or your local LLM (offline), using your local knowledge base when offline.
+Now, send messages to your AI node (e.g., `YourMeshAINode`) from your Meshtastic mobile app. The bridge will intelligently route your query to Gemini (online) or your local LLM (offline).
 
 ## 📡 Architecture
 
@@ -143,8 +119,7 @@ This bridge employs a hybrid intelligence architecture:
 3. **Dynamic LLM Dispatch**: 
    - **Online**: Routes queries to Google Gemini API (via `openai` client with `x-goog-api-key` header).
    - **Offline**: Attempts to connect to LM Studio's OpenAI-compatible API, falling back to Ollama if not available.
-4. **Local RAG Integration**: In offline mode, queries the `./knowledge_base/` for relevant document snippets using Langchain and local embeddings, injecting this context into the LLM prompt.
-5. **Meshtastic Response Sender**: Formats LLM responses for Meshtastic's limited payload size, chunking and paginating long messages, then sends them via `meshtastic --sendtext`.
+4. **Meshtastic Response Sender**: Formats LLM responses for Meshtastic's limited payload size, chunking and paginating long messages, then sends them via `meshtastic --sendtext`.
 
 ## 📝 Message Optimization for LoRa
 

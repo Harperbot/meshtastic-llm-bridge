@@ -1,5 +1,7 @@
 # Meshtastic-LLM Bridge 📡🧠
 
+**版本：** v0.2.0
+
 [English](README.md) | 繁體中文
 
 一個具備韌性、獨立運作的 Python 橋接器，旨在將您的 Meshtastic 設備連接到強大的大型語言模型 (LLMs)。此專案專為**「末日等級」的離網通訊**設計，讓您即使在沒有網際網路的情況下，也能與 AI 互動。

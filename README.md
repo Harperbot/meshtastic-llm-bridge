@@ -1,5 +1,7 @@
 # Meshtastic-LLM Bridge 📡🧠
 
+**Version:** v0.2.0
+
 [繁體中文](README.zh-TW.md) | English
 
 A resilient, standalone Python bridge connecting your Meshtastic device to powerful Large Language Models (LLMs). This project is designed for **"apocalypse-grade" off-grid communication**, allowing you to interact with AI even when the internet is down.

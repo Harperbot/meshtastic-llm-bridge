@@ -23,7 +23,7 @@ It intelligently switches between online (cloud LLM providers such as OpenAI, Ge
 
 ### Disaster Info Tools
 
-- **Shelter Finder**: Ask about nearby emergency shelters (`find_shelter` LLM tool), backed by Taiwan's National Fire Agency shelter dataset (works offline, no internet required)
+- **Shelter Finder**: Ask about nearby emergency shelters (`find_shelter` LLM tool), backed by Taiwan's National Fire Agency shelter dataset (works offline, no internet required). Results are cross-checked against a community-maintained coordinate-errata list ([WaytoSafety](https://g0v.hackmd.io/@waytosafety/home/), part of g0v's [DigiResiThon](https://g0v.hackmd.io/@paulpengtw/DigiResiTh0n-home) resilience effort) and flagged with a warning if the official coordinates are known to be inaccurate.
 - **SOS Broadcast**: Send `SOS` (optionally followed by a message, e.g. `SOS trapped on 2nd floor`) to broadcast your GPS location and timestamp to the entire mesh via Meshtastic's `ALERT_APP` priority channel. Rate-limited to once per 60 seconds per node to prevent accidental flooding.
 - **Safety Check-in**: Send `SAFE` or `平安` (optionally with a message) to broadcast that you're safe, same rate-limiting applies.
 

@@ -11,11 +11,31 @@ sys.path.insert(0, str(Path(__file__).parent))
 from geo_utils import haversine
 
 SHELTERS_FILE = Path(__file__).parent / "shelters.json"
+ERRATA_FILE = Path(__file__).parent / "shelter_errata.json"
+ERRATA_COORD_TOLERANCE = 0.0001  # 約 11 公尺
 
 
 def load_shelters(path: Path = SHELTERS_FILE) -> list:
     with open(path, encoding="utf-8") as f:
         return json.load(f)["shelters"]
+
+
+def load_errata(path: Path = ERRATA_FILE) -> list:
+    if not path.exists():
+        return []
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)["errata"]
+
+
+def is_flagged_by_errata(shelter: dict, errata: list) -> bool:
+    """名稱與座標都吻合才視為同一筆勘誤紀錄，避免同名不同地點誤判"""
+    for e in errata:
+        if e["name"] != shelter["name"]:
+            continue
+        if abs(e["lat"] - shelter["lat"]) < ERRATA_COORD_TOLERANCE and \
+           abs(e["lon"] - shelter["lon"]) < ERRATA_COORD_TOLERANCE:
+            return True
+    return False
 
 
 def find_nearest(lat: float, lon: float, shelters: list, n: int = 3) -> list:
@@ -24,14 +44,18 @@ def find_nearest(lat: float, lon: float, shelters: list, n: int = 3) -> list:
     return scored[:n]
 
 
-def format_results(results: list) -> str:
+def format_results(results: list, errata: list | None = None) -> str:
     if not results:
         return "附近查無避難收容處所資料。"
+    errata = errata if errata is not None else load_errata()
     lines = []
     for distance_m, s in results:
         distance_km = distance_m / 1000
         location = s["address"] or s["city_district"]
-        lines.append(f"{s['name']}（{distance_km:.1f}km）- {location} 容量約{s['capacity']}人")
+        line = f"{s['name']}（{distance_km:.1f}km）- {location} 容量約{s['capacity']}人"
+        if is_flagged_by_errata(s, errata):
+            line += "\n  ⚠️ 社群回報座標可能不準確，請以現場標示為準"
+        lines.append(line)
     return "\n".join(lines)
 
 

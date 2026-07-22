@@ -315,6 +315,8 @@ def execute_llm_tool_call(tool_call, is_online, localization_setting):
     """執行 LLM 的工具調用"""
     tool_name = tool_call.function.name
     tool_args = tool_call.function.arguments
+    if isinstance(tool_args, str):
+        tool_args = json.loads(tool_args)
     print(f"LLM 請求執行工具: {tool_name}，參數: {tool_args}")
 
     script_path = None

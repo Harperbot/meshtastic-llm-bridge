@@ -7,6 +7,7 @@ from pathlib import Path
 import json
 import subprocess
 import threading
+import types
 
 import meshtastic.serial_interface
 from pubsub import pub
@@ -465,6 +466,72 @@ def call_openai_compat_provider(provider_config, prompt, chat_history, is_online
         temperature=0.7,
     )
     return second_response.choices[0].message.content or ""
+
+
+def _build_anthropic_client(api_key):
+    """獨立包一層方便測試 monkeypatch"""
+    from anthropic import Anthropic
+    return Anthropic(api_key=api_key)
+
+
+def call_anthropic_provider(provider_config, prompt, chat_history, is_online):
+    """呼叫 Anthropic 原生 API（非 OpenAI-compatible，獨立處理 tool schema 與訊息格式）。
+    成功回傳最終文字；失敗 raise。
+    """
+    client = _build_anthropic_client(provider_config["api_key"])
+    messages = chat_history if chat_history is not None else []
+    messages.append({"role": "user", "content": prompt})
+
+    anthropic_tools = [
+        {
+            "name": t["function"]["name"],
+            "description": t["function"]["description"],
+            "input_schema": t["function"]["parameters"],
+        }
+        for t in llm_tools
+    ]
+
+    response = client.messages.create(
+        model=provider_config["model"],
+        max_tokens=200,
+        messages=messages,
+        tools=anthropic_tools,
+    )
+
+    if response.stop_reason != "tool_use":
+        return "".join(block.text for block in response.content if block.type == "text")
+
+    assistant_content = []
+    tool_use_blocks = []
+    for block in response.content:
+        if block.type == "text":
+            assistant_content.append({"type": "text", "text": block.text})
+        elif block.type == "tool_use":
+            assistant_content.append({"type": "tool_use", "id": block.id, "name": block.name, "input": block.input})
+            tool_use_blocks.append(block)
+    messages.append({"role": "assistant", "content": assistant_content})
+
+    tool_result_blocks = []
+    for block in tool_use_blocks:
+        fake_tool_call = types.SimpleNamespace(
+            function=types.SimpleNamespace(name=block.name, arguments=block.input)
+        )
+        output = execute_llm_tool_call(fake_tool_call, is_online, LOCALIZATION)
+        print(f"工具 {block.name} 執行結果: {output}")
+        tool_result_blocks.append({
+            "type": "tool_result",
+            "tool_use_id": block.id,
+            "content": json.dumps(output),
+        })
+    messages.append({"role": "user", "content": tool_result_blocks})
+
+    second_response = client.messages.create(
+        model=provider_config["model"],
+        max_tokens=200,
+        messages=messages,
+        tools=anthropic_tools,
+    )
+    return "".join(block.text for block in second_response.content if block.type == "text")
 
 
 def get_node_location(node_id_to_find):

@@ -89,3 +89,75 @@ def test_call_openai_compat_provider_passes_is_online_to_tool_execution(monkeypa
     bridge.call_openai_compat_provider(_make_provider_config(), "test", [], is_online=False)
 
     assert captured["is_online"] is False
+
+
+def _make_anthropic_config():
+    return {"label": "test-anthropic", "kind": "anthropic", "base_url": None, "api_key": "fake-anthropic-key", "model": "claude-sonnet-5"}
+
+
+def test_call_anthropic_provider_returns_text_without_tool_use(monkeypatch):
+    text_block = types.SimpleNamespace(type="text", text="這是 Claude 的回覆")
+    fake_response = types.SimpleNamespace(stop_reason="end_turn", content=[text_block])
+
+    fake_client = MagicMock()
+    fake_client.messages.create.return_value = fake_response
+    monkeypatch.setattr(bridge, "_build_anthropic_client", lambda api_key: fake_client)
+
+    result = bridge.call_anthropic_provider(_make_anthropic_config(), "你好", [], is_online=True)
+
+    assert result == "這是 Claude 的回覆"
+    call_kwargs = fake_client.messages.create.call_args.kwargs
+    assert call_kwargs["model"] == "claude-sonnet-5"
+    tool_names = [t["name"] for t in call_kwargs["tools"]]
+    assert "find_shelter" in tool_names
+    # Anthropic 用 input_schema，不是 OpenAI 的 parameters
+    shelter_tool = next(t for t in call_kwargs["tools"] if t["name"] == "find_shelter")
+    assert "input_schema" in shelter_tool
+    assert "parameters" not in shelter_tool
+
+
+def test_call_anthropic_provider_executes_tool_use_and_returns_second_response(monkeypatch):
+    tool_use_block = types.SimpleNamespace(
+        type="tool_use", id="toolu_1", name="find_shelter", input={"lat": 25.0, "lon": 121.0}
+    )
+    first_response = types.SimpleNamespace(stop_reason="tool_use", content=[tool_use_block])
+
+    text_block = types.SimpleNamespace(type="text", text="附近有避難所")
+    second_response = types.SimpleNamespace(stop_reason="end_turn", content=[text_block])
+
+    fake_client = MagicMock()
+    fake_client.messages.create.side_effect = [first_response, second_response]
+    monkeypatch.setattr(bridge, "_build_anthropic_client", lambda api_key: fake_client)
+
+    captured_tool_call = {}
+    def fake_execute(tc, is_online, loc):
+        captured_tool_call["name"] = tc.function.name
+        captured_tool_call["arguments"] = tc.function.arguments
+        return {"tool_output": "測試避難所"}
+    monkeypatch.setattr(bridge, "execute_llm_tool_call", fake_execute)
+
+    result = bridge.call_anthropic_provider(_make_anthropic_config(), "附近避難所在哪", [], is_online=True)
+
+    assert result == "附近有避難所"
+    assert captured_tool_call["name"] == "find_shelter"
+    assert captured_tool_call["arguments"] == {"lat": 25.0, "lon": 121.0}
+    assert fake_client.messages.create.call_count == 2
+
+    second_call_messages = fake_client.messages.create.call_args_list[1].kwargs["messages"]
+    tool_result_msg = second_call_messages[-1]
+    assert tool_result_msg["role"] == "user"
+    tool_result_block = tool_result_msg["content"][0]
+    assert tool_result_block["type"] == "tool_result"
+    assert tool_result_block["tool_use_id"] == "toolu_1"
+
+
+def test_call_anthropic_provider_raises_on_client_error(monkeypatch):
+    fake_client = MagicMock()
+    fake_client.messages.create.side_effect = RuntimeError("Anthropic API 錯誤")
+    monkeypatch.setattr(bridge, "_build_anthropic_client", lambda api_key: fake_client)
+
+    try:
+        bridge.call_anthropic_provider(_make_anthropic_config(), "你好", [], is_online=True)
+        assert False, "應該要 raise"
+    except RuntimeError as e:
+        assert "Anthropic API 錯誤" in str(e)

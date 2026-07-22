@@ -107,6 +107,77 @@ def alert_checker_thread():
 _interface = None
 RECONNECT_DELAY_SECONDS = 10
 
+# --- SOS/報平安 Cooldown ---
+SOS_COOLDOWN_SECONDS = 60
+SAFE_COOLDOWN_SECONDS = 60
+_last_sos_ts = {}
+_last_safe_ts = {}
+
+
+def _cooldown_allows(node_id: str, last_ts_map: dict, cooldown_seconds: float) -> bool:
+    """若不在 cooldown 內回傳 True 並更新時間戳；仍在 cooldown 內回傳 False 且不更新"""
+    now = time.time()
+    last = last_ts_map.get(node_id)
+    if last is not None and (now - last) < cooldown_seconds:
+        return False
+    last_ts_map[node_id] = now
+    return True
+
+
+def _match_sos_command(text: str):
+    """比對訊息是否為 SOS 指令，回傳附加訊息（可能為空字串）；不符合回傳 None"""
+    t = text.strip()
+    if len(t) >= 3 and t[:3].upper() == "SOS" and (len(t) == 3 or t[3] == " "):
+        return t[3:].strip()
+    return None
+
+
+def _match_safe_command(text: str):
+    """比對訊息是否為報平安指令，回傳附加訊息（可能為空字串）；不符合回傳 None"""
+    t = text.strip()
+    if len(t) >= 4 and t[:4].upper() == "SAFE" and (len(t) == 4 or t[4] == " "):
+        return t[4:].strip()
+    if t.startswith("平安"):
+        return t[2:].strip(" :：")
+    return None
+
+
+def _format_emergency_broadcast(kind: str, sender_id: str, location, extra_text: str, timestamp: str) -> str:
+    if location is None:
+        loc_str = "GPS 位置未知"
+    else:
+        lat, lon = location
+        loc_str = f"{lat:.5f},{lon:.5f}"
+
+    prefix = "🆘 SOS" if kind == "sos" else "✅ 平安回報"
+    text = f"{prefix} from {sender_id} @ {loc_str} [{timestamp}]"
+    if extra_text:
+        text += f" {extra_text}"
+    return text
+
+
+def _handle_emergency_broadcast(kind: str, sender_id: str, extra_text: str):
+    """SOS/報平安共用的廣播流程：cooldown 檢查 -> 取 GPS -> 組訊息 -> 廣播"""
+    last_ts_map = _last_sos_ts if kind == "sos" else _last_safe_ts
+    cooldown = SOS_COOLDOWN_SECONDS if kind == "sos" else SAFE_COOLDOWN_SECONDS
+
+    if not _cooldown_allows(sender_id, last_ts_map, cooldown):
+        print(f"{kind.upper()} from {sender_id} 已被 cooldown 抑制（{cooldown} 秒內重複觸發）")
+        return
+
+    location, _err = get_node_location(sender_id)
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    broadcast_text = _format_emergency_broadcast(kind, sender_id, location, extra_text, timestamp)
+
+    try:
+        if kind == "sos":
+            send_meshtastic_alert(broadcast_text, destination_id="^all")
+        else:
+            send_meshtastic_message(broadcast_text, destination_id="^all")
+        print(f"{kind.upper()} 廣播成功: {broadcast_text}")
+    except Exception as e:
+        print(f"❌ {kind.upper()} 廣播失敗: {e}", file=sys.stderr)
+
 MAX_MESHTASTIC_PAYLOAD = 220 # Roughly 220 bytes for plain text on Meshtastic LoRa
 
 def check_internet_connection():
@@ -288,6 +359,16 @@ def _get_content(msg):
 def handle_incoming_meshtastic_message(sender_id, text_message):
     """處理收到的 Meshtastic 訊息"""
     global internet_connected
+
+    sos_extra = _match_sos_command(text_message)
+    if sos_extra is not None:
+        _handle_emergency_broadcast("sos", sender_id, sos_extra)
+        return
+
+    safe_extra = _match_safe_command(text_message)
+    if safe_extra is not None:
+        _handle_emergency_broadcast("safe", sender_id, safe_extra)
+        return
 
     # --- GPS 感知天氣查詢 ---
     if "weather here" in text_message.lower() or "附近天氣" in text_message:

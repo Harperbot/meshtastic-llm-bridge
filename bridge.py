@@ -9,6 +9,9 @@ import subprocess
 import threading
 import types
 
+import meshtastic.serial_interface
+from pubsub import pub
+
 # Meshtastic CLI is assumed to be installed in the virtual environment
 # import meshtastic.serial_interface
 # from meshtastic import util
@@ -99,6 +102,11 @@ def alert_checker_thread():
         time.sleep(ALERT_CHECK_INTERVAL)
 
 # --- Utility Functions ---
+
+# --- Meshtastic Python API 介面 ---
+_interface = None
+RECONNECT_DELAY_SECONDS = 10
+
 MAX_MESHTASTIC_PAYLOAD = 220 # Roughly 220 bytes for plain text on Meshtastic LoRa
 
 def check_internet_connection():
@@ -117,23 +125,31 @@ def check_internet_connection():
     return internet_connected
 
 def send_meshtastic_message(text, destination_id=None, reply_id=None):
-    """透過 Meshtastic CLI 發送訊息，處理長訊息切分"""
+    """透過 Meshtastic Python API 發送文字訊息，處理長訊息切分"""
+    global _interface
     chunks = [text[i:i+MAX_MESHTASTIC_PAYLOAD] for i in range(0, len(text), MAX_MESHTASTIC_PAYLOAD)]
+    dest = destination_id if destination_id else "^all"
 
     for i, chunk in enumerate(chunks):
-        cmd = ["meshtastic", "--sendtext", chunk]
-        if destination_id:
-            cmd.extend(["--dest", destination_id])
-        if reply_id:
-            cmd.extend(["--replyid", reply_id])
-        
-        # Add pagination for long messages
         if len(chunks) > 1:
-            cmd[2] = f"({i+1}/{len(chunks)}) {chunk}"
-        
-        print(f"Sending Meshtastic: {' '.join(cmd)}")
-        subprocess.run(cmd, capture_output=True, text=True)
-        time.sleep(1) # Avoid flooding the mesh
+            chunk = f"({i+1}/{len(chunks)}) {chunk}"
+
+        kwargs = {"destinationId": dest}
+        if reply_id:
+            kwargs["replyId"] = reply_id
+
+        print(f"Sending Meshtastic text to {dest}: {chunk}")
+        _interface.sendText(chunk, **kwargs)
+        time.sleep(1)  # Avoid flooding the mesh
+
+
+def send_meshtastic_alert(text, destination_id=None):
+    """透過 Meshtastic Python API 發送 ALERT_APP 高優先權訊息（不分段，過長截斷）"""
+    global _interface
+    dest = destination_id if destination_id else "^all"
+    truncated = text[:MAX_MESHTASTIC_PAYLOAD]
+    print(f"Sending Meshtastic ALERT to {dest}: {truncated}")
+    _interface.sendAlert(truncated, destinationId=dest)
 
 def call_gemini_api_online(prompt, chat_history=None):
     """呼叫 Google Gemini API (在線模式) """
@@ -226,33 +242,34 @@ def execute_llm_tool_call(tool_call, is_online, localization_setting):
         return {"tool_output": f"❌ 工具執行發生未預期錯誤: {e}"}
 
 def get_node_location(node_id_to_find):
-    """執行 meshtastic --nodes 並解析輸出，獲取指定節點的 GPS 位置"""
-    try:
-        result = subprocess.run(["meshtastic", "--nodes"], capture_output=True, text=True, timeout=20)
-        if result.returncode != 0:
-            return None, "meshtastic --nodes command failed"
-        
-        lines = result.stdout.strip().split('\n')
-        # Find header to locate columns dynamically
-        header = [h.strip() for h in lines[0].split('|')]
-        try:
-            user_col = header.index("User")
-            lat_col = header.index("Latitude")
-            lon_col = header.index("Longitude")
-        except ValueError:
-            return None, "Could not parse --nodes header"
+    """從 interface.nodes 讀取指定節點的 GPS 位置"""
+    global _interface
+    if _interface is None:
+        return None, "Meshtastic interface not connected"
 
-        for line in lines[2:]: # Skip header and separator
-            cols = [c.strip() for c in line.split('|')]
-            if len(cols) > user_col and node_id_to_find in cols[user_col]:
-                lat = float(cols[lat_col])
-                lon = float(cols[lon_col])
-                if lat != 0.0 and lon != 0.0:
-                    return (lat, lon), None
-        
+    node_id = node_id_to_find if node_id_to_find.startswith("!") else f"!{node_id_to_find}"
+    node = _interface.nodes.get(node_id)
+    if not node:
         return None, "Node not found or has no GPS data"
+
+    position = node.get("position", {})
+    lat = position.get("latitude")
+    lon = position.get("longitude")
+    if lat is None or lon is None or (lat == 0.0 and lon == 0.0):
+        return None, "Node not found or has no GPS data"
+
+    return (lat, lon), None
+
+def _on_receive(packet, interface):
+    """pypubsub callback：收到 Meshtastic 文字訊息時觸發"""
+    try:
+        decoded = packet.get("decoded", {})
+        text = decoded.get("text")
+        sender_id = packet.get("fromId")
+        if text and sender_id:
+            handle_incoming_meshtastic_message(sender_id, text)
     except Exception as e:
-        return None, str(e)
+        print(f"處理收到訊息時發生錯誤: {e}", file=sys.stderr)
 
 def _get_content(msg):
     """統一取得 LLM 回傳的文字內容，相容 object 和 dict 格式"""
@@ -334,38 +351,28 @@ def handle_incoming_meshtastic_message(sender_id, text_message):
     # 4. 發送最終回覆 (處理長度限制)
     send_meshtastic_message(f"AI: {final_response_text}", destination_id=sender_id)
 
+def _connect_with_retry():
+    """持續嘗試連線 Meshtastic 裝置，成功前不返回"""
+    global _interface
+    while True:
+        try:
+            _interface = meshtastic.serial_interface.SerialInterface(devPath=MESHTASTIC_DEVICE_PATH)
+            print("Meshtastic 介面已連線。")
+            return
+        except Exception as e:
+            print(f"連線 Meshtastic 裝置失敗: {e}，{RECONNECT_DELAY_SECONDS} 秒後重試", file=sys.stderr)
+            time.sleep(RECONNECT_DELAY_SECONDS)
+
+
 def main_loop():
-    print("Meshtastic LLM Bridge 已啟動。正在監聽 Meshtastic 設備...")
+    print("Meshtastic LLM Bridge 已啟動（Python API 模式）。正在連線 Meshtastic 裝置...")
     print(f"本地工具路徑: {os.getcwd()}/tools/taiwan/")
-    print("請確保您的 Meshtastic 設備已連接並開啟電源。")
 
-    # 創建一個新的線程來處理 Meshtastic 輸出，防止阻塞
-    # meshtastic --port <device_path> --setowner <long_name> --info --listen
-    # For simplicity, we'll use subprocess.Popen to run meshtastic --listen
-    # and parse its stdout.
-    meshtastic_cmd = ["meshtastic", "--listen"]
-    # Optional: Set owner and longname (only once)
-    # meshtastic_setup_cmd = ["meshtastic", "--port", MESHTASTIC_DEVICE_PATH, 
-    #                          "--setowner", MESHTASTIC_LONGNAME, "--info"]
-    # subprocess.run(meshtastic_setup_cmd)
+    pub.subscribe(_on_receive, "meshtastic.receive.text")
+    _connect_with_retry()
 
-    process = subprocess.Popen(meshtastic_cmd, stdout=subprocess.PIPE, text=True, bufsize=1, universal_newlines=True)
-
-    for line in process.stdout:
-        if "text:" in line and "from:" in line:
-            # Example line: "(MeshPacket id=...) from: !d2d2a4e4, text: Hello AI"
-            parts = line.split(" ")
-            sender_id = None
-            message_text = []
-            for i, part in enumerate(parts):
-                if "from:" in part:
-                    sender_id = part.replace("from:", "").replace("!", "").strip(",")
-                elif "text:" in part:
-                    message_text = parts[i+1:] # Get everything after "text:"
-                    break
-            
-            if sender_id and message_text:
-                handle_incoming_meshtastic_message(sender_id, " ".join(message_text).strip())
+    while True:
+        time.sleep(3600)
 
 if __name__ == "__main__":
     # 啟動時先檢查一次網路

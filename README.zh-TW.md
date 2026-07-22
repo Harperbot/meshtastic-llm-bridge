@@ -63,7 +63,7 @@
 3. **確認路徑**：開啟終端機，輸入 `ls /dev/cu.usb*` (Mac) 或 `ls /dev/ttyUSB*` (Linux)，會看到一串像 `/dev/cu.usbserial-1410` 的文字，這就是您的設備路徑。
 
 ### 第二步：取得免費金鑰
-1. **Gemini 金鑰**：登入 [Google AI Studio](https://aistudio.google.com/app/apikey) 建立 API Key。
+1. **雲端 LLM 金鑰**：任選一家取得 API Key 即可，例如 [Google AI Studio（Gemini）](https://aistudio.google.com/app/apikey)、[OpenAI](https://platform.openai.com/api-keys)、[Groq](https://console.groq.com/keys)、[Mistral](https://console.mistral.ai/)、[OpenRouter](https://openrouter.ai/keys) 或 [Anthropic](https://console.anthropic.com/)——多家皆提供免費額度（詳見上方「帳號與金鑰需求」）。若只打算用本地 LLM 離線運作，可略過這步，不需要任何雲端金鑰。
 2. **您的使用者 ID**：在 Telegram 搜尋 `@userinfobot` 並傳訊息給它，拿到您的數字 ID (用於警報廣播)。
 
 ### 第三步：設定與執行

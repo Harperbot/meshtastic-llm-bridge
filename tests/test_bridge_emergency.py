@@ -136,6 +136,13 @@ def test_match_safe_command_does_not_match_unrelated_text():
     assert bridge._match_safe_command("hello") is None
 
 
+def test_match_safe_command_chinese_requires_word_boundary():
+    assert bridge._match_safe_command("平安夜快樂嗎") is None
+    assert bridge._match_safe_command("平安符哪裡買") is None
+    assert bridge._match_safe_command("平安：我在家") == "我在家"
+    assert bridge._match_safe_command("平安") == ""
+
+
 def test_handle_emergency_broadcast_calls_send_text_for_safe_not_alert(monkeypatch):
     text_sent = []
     alert_sent = []

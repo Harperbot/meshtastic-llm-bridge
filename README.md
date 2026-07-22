@@ -16,7 +16,7 @@ It intelligently switches between online (Google Gemini) and offline (Local LLMs
 - **GPS-Aware Weather Queries**: Send a simple command like `"weather here"` from your device, and the bridge will automatically use your node's GPS location to fetch the local weather forecast. No manual coordinates needed!
 - **Government Alert Broadcast**: In online mode, the bridge actively monitors Taiwan's NCDR (National Science and Technology Center for Disaster Reduction) CAP feed. If a severe alert (earthquake, typhoon, air raid, etc.) is issued, it will be automatically broadcast to all devices on the mesh network (`^all`).
 - **Robust LLM Response Handling**: Compatible with both object-style and dict-style LLM responses via unified `_get_content()` helper, ensuring stability across different OpenAI-compatible backends.
-- **Meshtastic Communication**: Utilizes the Meshtastic CLI for sending and receiving messages over LoRa mesh networks.
+- **Meshtastic Communication**: Uses the Meshtastic Python API (`meshtastic.serial_interface.SerialInterface`) directly, subscribing to incoming messages via `pypubsub` and sending with `sendText`/`sendAlert`. Automatically detects and recovers from serial disconnects in the background.
 - **Message Chunking & Pagination**: Automatically splits long LLM responses into multiple Meshtastic packets with pagination (`(1/3)`) due to LoRa's limited payload size.
 - **Resource Optimization**: Designed for low-bandwidth, low-power Meshtastic networks.
 - **Easy Setup**: Runs as a standalone Python script with `.env` configuration.
@@ -114,12 +114,12 @@ Now, send messages to your AI node (e.g., `YourMeshAINode`) from your Meshtastic
 ## 📡 Architecture
 
 This bridge employs a hybrid intelligence architecture:
-1. **Meshtastic CLI Listener**: Continuously monitors incoming LoRa messages via `meshtastic --listen`.
+1. **Meshtastic Python API Listener**: Opens a persistent `SerialInterface` connection to the radio and subscribes to `meshtastic.receive.text` via `pypubsub`, so incoming LoRa messages are delivered directly to the bridge process (no CLI subprocess involved). A separate `meshtastic.connection.lost` subscription triggers automatic background reconnection if the serial link drops.
 2. **Internet Connectivity Check**: Periodically pings a reliable endpoint to determine online/offline status.
 3. **Dynamic LLM Dispatch**: 
    - **Online**: Routes queries to Google Gemini API (via `openai` client with `x-goog-api-key` header).
    - **Offline**: Attempts to connect to LM Studio's OpenAI-compatible API, falling back to Ollama if not available.
-4. **Meshtastic Response Sender**: Formats LLM responses for Meshtastic's limited payload size, chunking and paginating long messages, then sends them via `meshtastic --sendtext`.
+4. **Meshtastic Response Sender**: Formats LLM responses for Meshtastic's limited payload size, chunking and paginating long messages, then sends them via `interface.sendText()` (or `interface.sendAlert()` for high-priority SOS/alert broadcasts).
 
 ## 📝 Message Optimization for LoRa
 

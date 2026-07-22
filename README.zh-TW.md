@@ -15,7 +15,7 @@
   - **離線模式**：無縫切換到本地 LLMs (LM Studio 或 Ollama)，提供離網 AI 能力。
 - **GPS 感知天氣查詢**：從您的 Meshtastic 設備發送 `weather here` 或 `附近天氣`，橋接器會自動使用您設備回傳的 GPS 位置來查詢當地天氣預報，無需手動輸入座標！
 - **政府災防告警廣播**：在「在線模式」下，橋接器會主動監控台灣**國家災害防救科技中心 (NCDR)** 的共通示警平台 (CAP) Feed。一旦有嚴重災害（地震、颱風、空襲等）發布，它會自動將警報廣播給網狀網路中的所有設備 (`^all`)。
-- **Meshtastic 通訊**：利用 Meshtastic CLI 進行 LoRa 網狀網路的訊息收發。
+- **Meshtastic 通訊**：直接使用 Meshtastic Python API（`meshtastic.serial_interface.SerialInterface`），透過 `pypubsub` 訂閱收到的訊息，並以 `sendText`/`sendAlert` 發送。連線中斷時會在背景自動偵測並重新連線。
 - **訊息切分與分頁**：由於 LoRa 承載量有限，會自動將 LLM 的長回覆切分成多個 Meshtastic 封包，並加上分頁標示 (例如 `(1/3)`)。
 - **資源最佳化**：專為低頻寬、低功耗的 Meshtastic 網路設計。
 - **簡易設定**：作為一個獨立的 Python 腳本運行，透過 `.env` 檔案進行配置。
@@ -141,12 +141,12 @@ CWA_API_KEY=your_cwa_key_here
 ## 📡 系統架構
 
 此橋接器採用混合智慧架構：
-1. **Meshtastic CLI 監聽器**：透過 `meshtastic --listen` 持續監控傳入的 LoRa 訊息。
+1. **Meshtastic Python API 監聽器**：與收發機建立持續的 `SerialInterface` 連線，並透過 `pypubsub` 訂閱 `meshtastic.receive.text`，讓傳入的 LoRa 訊息直接送達橋接器程序（不經過任何 CLI 子程序）。另有 `meshtastic.connection.lost` 訂閱，一旦序列埠連線中斷即自動在背景重新連線。
 2. **網際網路連線檢查**：定期 ping 一個可靠的端點，以判斷在線/離線狀態。
 3. **動態 LLM 分派**：
    - **在線**：將查詢路由到 Google Gemini API（透過 `openai` 客戶端與 `x-goog-api-key` 標頭）。
    - **離線**：嘗試連線到 LM Studio 的 OpenAI 相容 API，如果不可用則回退到 Ollama。
-4. **Meshtastic 回覆發送器**：將 LLM 回覆格式化為適合 Meshtastic 有限承載量的大小，切分並分頁長訊息，然後透過 `meshtastic --sendtext` 發送。
+4. **Meshtastic 回覆發送器**：將 LLM 回覆格式化為適合 Meshtastic 有限承載量的大小，切分並分頁長訊息，然後透過 `interface.sendText()` 發送（緊急 SOS/告警廣播則使用高優先權的 `interface.sendAlert()`）。
 
 ## 📝 LoRa 訊息最佳化建議
 

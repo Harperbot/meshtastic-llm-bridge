@@ -127,6 +127,21 @@ def test_send_meshtastic_alert_truncates_by_utf8_bytes_not_chars(monkeypatch):
     assert len(sent_text.encode("utf-8")) <= bridge.MAX_MESHTASTIC_PAYLOAD
 
 
+def test_weather_here_no_gps_sends_error_instead_of_crashing(monkeypatch):
+    sent = []
+    monkeypatch.setattr(bridge, "get_node_location", lambda node_id: (None, "Node not found or has no GPS data"))
+    monkeypatch.setattr(
+        bridge, "send_meshtastic_message",
+        lambda text, destination_id=None, reply_id=None: sent.append((text, destination_id)) or True,
+    )
+
+    bridge.handle_incoming_meshtastic_message("!d2d2a4e4", "weather here")
+
+    assert len(sent) == 1
+    assert "無法獲取您的 GPS 位置" in sent[0][0]
+    assert sent[0][1] == "!d2d2a4e4"
+
+
 def test_on_receive_dispatches_to_handler(monkeypatch):
     calls = []
     monkeypatch.setattr(

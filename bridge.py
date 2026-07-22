@@ -7,7 +7,6 @@ from pathlib import Path
 import json
 import subprocess
 import threading
-import types
 
 import meshtastic.serial_interface
 from pubsub import pub
@@ -137,7 +136,7 @@ def _match_safe_command(text: str):
     t = text.strip()
     if len(t) >= 4 and t[:4].upper() == "SAFE" and (len(t) == 4 or t[4] == " "):
         return t[4:].strip()
-    if t.startswith("平安"):
+    if t.startswith("平安") and (len(t) == 2 or t[2] in (" ", ":", "：")):
         return t[2:].strip(" :：")
     return None
 
@@ -393,10 +392,11 @@ def handle_incoming_meshtastic_message(sender_id, text_message):
     # --- GPS 感知天氣查詢 ---
     if "weather here" in text_message.lower() or "附近天氣" in text_message:
         print(f"偵測到 GPS 天氣查詢 from {sender_id}")
-        (lat, lon), error_msg = get_node_location(sender_id)
+        location, error_msg = get_node_location(sender_id)
         if error_msg:
             send_meshtastic_message(f"❌ 無法獲取您的 GPS 位置: {error_msg}", destination_id=sender_id)
             return
+        lat, lon = location
 
         weather_script = Path(__file__).parent / "tools" / "taiwan" / "weather_query.py"
         try:

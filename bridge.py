@@ -24,15 +24,91 @@ MESHTASTIC_DEVICE_PATH = os.getenv("MESHTASTIC_DEVICE_PATH", "/dev/ttyUSB0") # e
 MESHTASTIC_LONGNAME = os.getenv("MESHTASTIC_LONGNAME", "MeshtasticAI")
 LOCALIZATION = os.getenv("LOCALIZATION", "TW")
 
-# Google Gemini API (Online Mode)
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL_ONLINE = os.getenv("GEMINI_MODEL_ONLINE", "gemini-flash-latest") # Use a strong model for online (rolling alias, 2026-06-17 後自動指向 3.x)
+# --- LLM Provider 設定（雲端多家備援 + 本地任意 OpenAI-compat backend）---
+CLOUD_PROVIDER_DEFAULTS = {
+    "openai": "https://api.openai.com/v1",
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/",
+    "groq": "https://api.groq.com/openai/v1",
+    "mistral": "https://api.mistral.ai/v1",
+    "openrouter": "https://openrouter.ai/api/v1",
+}
 
-# Local LLM (Offline Mode) - LM Studio or Ollama
-LOCAL_LLM_API_BASE = os.getenv("LOCAL_LLM_API_BASE", "http://localhost:1234/v1") # LM Studio default
-LOCAL_LLM_MODEL = os.getenv("LOCAL_LLM_MODEL", "llama4-scout-openclaw:iq2")
-LOCAL_LLM_OLLAMA_API_BASE = os.getenv("LOCAL_LLM_OLLAMA_API_BASE", "http://0.0.0.0:11434/api")
-LOCAL_LLM_OLLAMA_MODEL = os.getenv("LOCAL_LLM_OLLAMA_MODEL", "gpt-oss-openclaw:20b")
+
+def _scan_cloud_provider_slots() -> list:
+    """掃描 CLOUD_LLM_{N}_* 環境變數（N=1,2,3...），組出有序 provider 清單。
+    某編號完全沒有任何對應變數時停止掃描；設定不完整的 slot 會被跳過但繼續往下一個編號找。
+    """
+    providers = []
+    n = 1
+    while True:
+        provider_name = os.getenv(f"CLOUD_LLM_{n}_PROVIDER")
+        api_key = os.getenv(f"CLOUD_LLM_{n}_API_KEY")
+        model = os.getenv(f"CLOUD_LLM_{n}_MODEL")
+        base_url = os.getenv(f"CLOUD_LLM_{n}_BASE_URL")
+
+        if provider_name is None and api_key is None and model is None and base_url is None:
+            break
+
+        if not provider_name or not api_key or not model:
+            print(f"⚠️ CLOUD_LLM_{n}_* 設定不完整，跳過", file=sys.stderr)
+            n += 1
+            continue
+
+        kind = "anthropic" if provider_name == "anthropic" else "openai_compat"
+        resolved_base_url = base_url or CLOUD_PROVIDER_DEFAULTS.get(provider_name)
+        if kind == "openai_compat" and not resolved_base_url:
+            print(f"⚠️ CLOUD_LLM_{n}_PROVIDER={provider_name} 缺少 BASE_URL，跳過", file=sys.stderr)
+            n += 1
+            continue
+
+        providers.append({
+            "label": f"cloud#{n}:{provider_name}",
+            "kind": kind,
+            "base_url": resolved_base_url,
+            "api_key": api_key,
+            "model": model,
+        })
+        n += 1
+    return providers
+
+
+def _scan_local_provider_slots() -> list:
+    """掃描 LOCAL_LLM_{N}_* 環境變數（N=1,2,3...），組出有序本地 provider 清單。
+    不限定特定服務名稱，任意 OpenAI-compatible 本地服務皆可設定。
+    """
+    providers = []
+    n = 1
+    while True:
+        base_url = os.getenv(f"LOCAL_LLM_{n}_BASE_URL")
+        model = os.getenv(f"LOCAL_LLM_{n}_MODEL")
+        api_key = os.getenv(f"LOCAL_LLM_{n}_API_KEY")
+
+        if base_url is None and model is None and api_key is None:
+            break
+
+        if not base_url or not model:
+            print(f"⚠️ LOCAL_LLM_{n}_* 設定不完整，跳過", file=sys.stderr)
+            n += 1
+            continue
+
+        providers.append({
+            "label": f"local#{n}",
+            "kind": "openai_compat",
+            "base_url": base_url,
+            "api_key": api_key or "not-needed",
+            "model": model,
+        })
+        n += 1
+    return providers
+
+
+CLOUD_LLM_PROVIDERS = _scan_cloud_provider_slots()
+LOCAL_LLM_PROVIDERS = _scan_local_provider_slots()
+
+if not CLOUD_LLM_PROVIDERS:
+    print("⚠️ 未設定任何 CLOUD_LLM_*_PROVIDER，線上模式將無法使用", file=sys.stderr)
+if not LOCAL_LLM_PROVIDERS:
+    print("⚠️ 未設定任何 LOCAL_LLM_*_BASE_URL，離線模式將無法使用", file=sys.stderr)
 
 processed_alert_ids = set() # 用於儲存已處理過的警報 ID
 NCDR_CAP_URL = "https://alerts.ncdr.nat.gov.tw/CAP/Atom.aspx"

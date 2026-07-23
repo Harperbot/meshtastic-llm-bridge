@@ -9,6 +9,25 @@ def _make_provider_config(label="test"):
     return {"label": label, "kind": "openai_compat", "base_url": "http://fake/v1", "api_key": "fake-key", "model": "fake-model"}
 
 
+def test_llm_max_tokens_high_enough_for_reasoning_models():
+    """max_tokens 太小(舊值 200)時, thinking/reasoning 類本地模型會把預算全花在內部思考,
+    導致最終 content 是空字串(實測 gemma4:e2b-it-qat 對 Ollama /v1 端點的真實行為)"""
+    assert bridge.LLM_MAX_TOKENS >= 800
+
+
+def test_call_openai_compat_provider_uses_llm_max_tokens_constant(monkeypatch):
+    fake_message = types.SimpleNamespace(content="這是回覆", tool_calls=None)
+    fake_response = types.SimpleNamespace(choices=[types.SimpleNamespace(message=fake_message)])
+
+    fake_client = MagicMock()
+    fake_client.chat.completions.create.return_value = fake_response
+    monkeypatch.setattr(bridge, "_build_openai_client", lambda base_url, api_key: fake_client)
+
+    bridge.call_openai_compat_provider(_make_provider_config(), "test", [], is_online=True)
+
+    assert fake_client.chat.completions.create.call_args.kwargs["max_tokens"] == bridge.LLM_MAX_TOKENS
+
+
 def test_call_openai_compat_provider_returns_text_without_tool_calls(monkeypatch):
     fake_message = types.SimpleNamespace(content="這是回覆", tool_calls=None)
     fake_response = types.SimpleNamespace(choices=[types.SimpleNamespace(message=fake_message)])

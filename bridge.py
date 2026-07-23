@@ -262,6 +262,7 @@ def _handle_emergency_broadcast(kind: str, sender_id: str, extra_text: str):
         print(f"❌ {kind.upper()} 廣播失敗: {e}", file=sys.stderr)
 
 MAX_MESHTASTIC_PAYLOAD = 220 # Roughly 220 bytes for plain text on Meshtastic LoRa
+LLM_MAX_TOKENS = 800 # 留給 reasoning 類模型的思考過程足夠空間，實際回覆送出前仍會被 Meshtastic payload 限制切段
 
 def check_internet_connection():
     """檢查是否有網際網路連線"""
@@ -371,7 +372,7 @@ def call_openai_compat_provider(provider_config, prompt, chat_history, is_online
         messages=messages,
         tools=llm_tools,
         tool_choice="auto",
-        max_tokens=200,
+        max_tokens=LLM_MAX_TOKENS,
         temperature=0.7,
     )
     message = response.choices[0].message
@@ -398,7 +399,7 @@ def call_openai_compat_provider(provider_config, prompt, chat_history, is_online
         messages=messages,
         tools=llm_tools,
         tool_choice="auto",
-        max_tokens=200,
+        max_tokens=LLM_MAX_TOKENS,
         temperature=0.7,
     )
     return second_response.choices[0].message.content or ""
@@ -429,7 +430,7 @@ def call_anthropic_provider(provider_config, prompt, chat_history, is_online):
 
     response = client.messages.create(
         model=provider_config["model"],
-        max_tokens=200,
+        max_tokens=LLM_MAX_TOKENS,
         messages=messages,
         tools=anthropic_tools,
     )
@@ -463,7 +464,7 @@ def call_anthropic_provider(provider_config, prompt, chat_history, is_online):
 
     second_response = client.messages.create(
         model=provider_config["model"],
-        max_tokens=200,
+        max_tokens=LLM_MAX_TOKENS,
         messages=messages,
         tools=anthropic_tools,
     )
